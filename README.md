@@ -140,7 +140,7 @@ Borde
 Otra fuente / Origen
 ```
 
-Se deberán registrar los aciertos y fallos para permitir evaluar el comportamiento del sistema.
+Se deberán registrar los aciertos y fallos para permitir evaluar el comportamiento del sistema. El formato, las operaciones que se anotan y dónde se guarda ese historial están descritos en [Registro de operaciones](#registro-de-operaciones).
 
 ---
 
@@ -452,4 +452,147 @@ El proyecto podrá organizarse conceptualmente en los siguientes componentes:
 | **Version Manager**      | Controlar versiones y consistencia                  |
 | **Invalidation Manager** | Gestionar invalidaciones                            |
 | **Revalidation Manager** | Comprobar y actualizar copias                       |
+| **Registro**             | Anotar cada operación en una línea de historial     |
+| **Transporte**           | Enviar y recibir mensajes entre nodos               |
+
+---
+
+# Registro de operaciones
+
+Origen, bordes, selector y cliente anotan cada operación relevante en un historial de texto. El historial sirve para seguir un pedido de punta a punta y comprobar qué rama de la regla se tomó. No se guarda el contenido del archivo: solo la decisión y los datos que la justifican.
+
+Todas las anotaciones pasan por una única función compartida:
+
+```text
+registrar(nodo, pedido_id, operacion, datos...)
+```
+
+Nadie escribe el historial por su cuenta. Así el formato es el mismo en todos los programas.
+
+## Identificador de pedido
+
+El cliente crea un `pedido_id` al armar la solicitud y lo incluye en el mensaje. El borde lo copia cuando habla con el origen, y el origen lo copia en su propia línea. Filtrar el historial por ese identificador muestra el recorrido completo del pedido.
+
+## Qué se anota
+
+Cada operación del sistema produce una línea:
+
+| Quién    | Operación                                      | Qué queda escrito                                              |
+| -------- | ---------------------------------------------- | -------------------------------------------------------------- |
+| Cliente  | `solicitud`                                    | Recurso y borde elegido                                        |
+| Cliente  | `respuesta`                                    | Versión recibida y resultado (`hit`, `miss`, `sirve_obsoleta` o `rechaza`) |
+| Borde    | `hit`                                          | Recurso, versión y estado `fresca`                             |
+| Borde    | `miss`                                         | Recurso y causa: `no_esta`, `expirada`, `invalidada` o `supera_limite` |
+| Borde    | `pide_origen`                                  | Recurso y versión local, si había                              |
+| Origen   | `responde`                                     | Recurso y versión entregada                                    |
+| Borde    | `guarda`                                       | Recurso, versión y expiración                                  |
+| Borde    | `expulsion`                                    | Recurso que sale, política y recurso que entra                 |
+| Origen   | `invalidar`                                    | Recurso, versión nueva y bordes avisados                       |
+| Borde    | `invalidacion_recibida` o `invalidacion_perdida` | Recurso                                                      |
+| Borde    | `revalida`                                     | Versión local, versión del origen, y si renovó o bajó otra     |
+| Borde    | `origen_no_responde`                           | Recurso, segundos de obsolescencia y `STALE_LIMIT`             |
+| Borde    | `sirve_obsoleta` o `rechaza`                   | La rama que tomó la regla                                      |
+| Cualquiera | `timeout` o `nodo_caido`                     | A quién se llamó y que no contestó                             |
+
+Un miss también se anota cuando la copia está guardada y no se puede usar: expirada, invalidada o por encima de `STALE_LIMIT`. No solo cuando el archivo falta.
+
+La edad de la copia, la expiración y `STALE_LIMIT` se escriben como datos de la línea. Quien lee el historial no tiene que recalcularlos.
+
+## Formato de una línea
+
+Cada línea lleva siempre la hora, el nodo, el `pedido_id` y la operación. El resto son los datos de esa operación.
+
+Un primer pedido, resuelto contra el origen:
+
+```text
+12:01:03.120 cliente pedido=7d2 solicitud recurso=apunte.pdf fuente=borde-1
+12:01:03.131 borde-1 pedido=7d2 miss recurso=apunte.pdf causa=no_esta
+12:01:03.140 borde-1 pedido=7d2 pide_origen recurso=apunte.pdf
+12:01:03.155 origen   pedido=7d2 responde recurso=apunte.pdf version=1
+12:01:03.160 borde-1 pedido=7d2 guarda recurso=apunte.pdf version=1 expira=12:01:33
+12:01:04.010 cliente pedido=7d2 respuesta version=1 resultado=miss
+```
+
+Una copia vencida, con el origen inalcanzable y dentro del límite:
+
+```text
+12:11:20.004 borde-1 pedido=9af origen_no_responde recurso=apunte.pdf edad_segundos=180 stale_limit=600
+12:11:20.008 borde-1 pedido=9af sirve_obsoleta recurso=apunte.pdf version=4
+```
+
+## Dónde se guarda
+
+Cada nodo abre un archivo al arrancar y agrega ahí una línea por operación:
+
+```text
+logs/origen.log
+logs/borde-1.log
+logs/borde-2.log
+logs/cliente.log
+```
+
+La misma línea se muestra en la consola de ese programa, para verla mientras corre. El directorio `logs/` no se versiona.
+
+Para reconstruir un pedido:
+
+```text
+grep "pedido=7d2" logs/*.log
+```
+
+Los aciertos y los fallos se cuentan a partir de las líneas `hit` y `miss`. Esa cuenta es la que permite decir si la caché está sirviendo de algo.
+
+## Desde el primer paso
+
+El registro existe desde la primera operación que se implemente. El origen, al responder un recurso, ya llama a `registrar`. Cada operación nueva agrega su línea con el mismo formato, sin cambiar los campos fijos: hora, nodo, `pedido_id` y operación.
+
+---
+
+# Transporte y cifrado
+
+La comunicación entre el origen y los bordes pasa siempre por un único punto de transporte. La lógica de caché, versiones, invalidación, revalidación y registro no abre sockets ni conoce si el canal va en claro o cifrado.
+
+## Qué dejar preparado desde el principio
+
+Origen y bordes se hablan solo con estas dos operaciones:
+
+```text
+enviar(destino, mensaje)
+recibir() -> mensaje
+```
+
+Por encima de esas operaciones el mensaje sigue siendo texto: recurso, versión, `pedido_id` e invalidación. La primera implementación de `enviar` y `recibir` usa TCP en claro. Con ese canal se construye y se prueba el resto del sistema.
+
+El cifrado queda apagado en la configuración:
+
+```text
+cifrado = false
+```
+
+Con `false`, el transporte abre el socket y escribe el mensaje tal cual. Cambiarlo a `true` más adelante no modifica las reglas ni el formato del historial.
+
+## A partir de cuándo agregar TLS
+
+TLS es un plus. Se empieza solo cuando el proyecto completo ya funciona en claro y se puede demostrar de punta a punta:
+
+* Selección de fuente, aciertos y fallos.
+* Expulsión, expiración y versiones.
+* Invalidación, incluido un aviso que no llega.
+* Revalidación contra el origen.
+* Fallo de un borde.
+* Partición con el origen y la regla de `STALE_LIMIT` (servir la copia dentro del límite y rechazarla cuando lo supera).
+
+Ese es el punto de partida. Antes de eso, el cifrado no se implementa.
+
+A partir de ahí, si queda tiempo:
+
+1. `enviar` y `recibir` pasan a envolver el mismo TCP con TLS, usando la biblioteca del lenguaje. El cifrado no se implementa a mano.
+2. Se crea una autoridad local del proyecto. El origen tiene su certificado y cada borde comprueba que está hablando con ese origen.
+3. Se pone `cifrado = true` y se repiten las mismas pruebas que ya pasaban en claro. Hit, invalidación perdida, revalidación y `STALE_LIMIT` tienen que dar el mismo resultado.
+4. Un fallo de handshake se trata como `origen_no_responde`: el borde aplica la regla de contenido obsoleto y lo anota en el historial.
+
+Si después de eso todavía hay tiempo, cada borde presenta también su certificado y el origen solo acepta a los bordes conocidos.
+
+El canal cifrado cubre la bajada del archivo, la revalidación y la invalidación. El cliente puede seguir hablando con el borde en claro. Lo que esta capa protege es que un borde acepte versiones e invalidaciones solo del origen de verdad.
+
+Quedan fuera de esta capa, aunque sobre tiempo: un cifrado propio, cifrar el historial y cifrar las copias guardadas en el borde.
 
