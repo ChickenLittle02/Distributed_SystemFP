@@ -16,9 +16,14 @@ Los comentarios dentro de cada archivo siguen siendo obligatorios. Esta página 
 ```text
 fase1/
   __init__.py           Paquete del prototipo Ray
+  config.py             Números y listas de la corrida (TTL, STALE_LIMIT, bordes...)
   registro.py           Historial compartido (registrar)
   origen.py             Actor origen: versiones y responder
+  borde.py              Actor borde: hoy reenvía al origen (esqueleto)
+  cliente.py            Actor cliente: pedido_id, solicitud y respuesta (esqueleto)
   arrancar_origen.py    Arranca Ray y prueba listo + responder
+  arrancar_borde.py     Arranca Ray, origen y un borde vacío
+  arrancar_sistema.py   Arranca origen, dos bordes y cliente, y hace un pedido
 contenido/
   apunte.txt            Archivo de prueba que reparte el origen
 logs/                   Historial en disco (no se versiona)
@@ -124,3 +129,83 @@ python3 -m fase1.arrancar_origen
 - Qué es: dependencias Python de la fase 1.
 - Dónde: `requirements.txt` en la raíz.
 - Qué hace hoy: declara `ray`. Instalar con `pip install -r requirements.txt`.
+
+## fase1/config.py
+
+- Qué es: la configuración de la corrida, en un solo sitio.
+- Dónde: `fase1/config.py`, clase `Config`.
+- Qué hace: guarda `ttl_segundos` (30), `stale_limit_segundos` (60), `capacidad` (2), `expulsion` (`LRU`), `timeout_segundos` (2), `cifrado` (`False`) y `bordes` (`["borde-1", "borde-2"]`, orden de preferencia). `Config.desde_entorno()` deja cambiar los cuatro números con `P20_TTL`, `P20_STALE_LIMIT`, `P20_CAPACIDAD` y `P20_TIMEOUT` para acortar una prueba. Lleva la frase de la política de selección como comentario.
+- Qué no hace: no decide nada; borde y cliente leen de aquí.
+- Tareas: F1-S03 (y la usan S05, S06, S07, S09).
+- Implementa: Samy. Revisa: Rubén (pendiente).
+
+## fase1/borde.py
+
+- Qué es: el actor Ray del borde, la caché cercana al cliente. Hoy es un esqueleto: el «borde que reenvía» de la guía (parte 6, paso 2).
+- Dónde: `fase1/borde.py`, clase `Borde`.
+- Qué hace: `pedir(pedido_id, recurso)` anota `pide_origen`, llama a `origen.responder` y devuelve `miss` con versión y contenido, o `file_doesnt_exist`. `estado()` devuelve las copias (vacío por ahora).
+- Qué no hace: no guarda copias, así que no hay `hit` (F1-S04), ni TTL (F1-S05), ni expulsión (F1-S06), ni revalidación (F1-S08), ni `STALE_LIMIT` ni tiempo de espera al origen (F1-S09), ni `invalidar` (lo aplica el borde cuando exista F1-R06).
+- Tareas: F1-S01, F1-S03.
+- Implementa: Samy. Revisa: Rubén (pendiente).
+
+### Método `listo`
+
+| | |
+| --- | --- |
+| Entra | Nada |
+| Sale | El nombre del nodo (`"borde-1"`) |
+| Si el otro nodo no contesta | No aplica |
+
+Deja `listo capacidad=2 ttl=30 stale_limit=60` en `logs/borde-1.log`.
+
+### Método `pedir`
+
+| | |
+| --- | --- |
+| Entra | `pedido_id` (del cliente) y `recurso` |
+| Sale | Dict `resultado`, `version`, `contenido` con el formato de `docs/contrato.md` |
+| Si el otro nodo no contesta | Hoy espera sin límite; el tiempo de espera llega con F1-S09 |
+
+Historial de hoy:
+
+```text
+borde-1 pedido=f3cb77 pide_origen recurso=apunte.txt
+```
+
+## fase1/cliente.py
+
+- Qué es: el actor Ray del cliente, en su propio proceso.
+- Dónde: `fase1/cliente.py`, clase `Cliente`.
+- Qué hace: `pedir(recurso)` crea el `pedido_id` (6 hex), anota `solicitud recurso=… fuente=borde-1`, llama a `pedir` del primer borde de `Config.bordes` y anota `respuesta version=… resultado=…`. Devuelve el dict del borde más `fuente` y `pedido_id`. Acepta un `pedido_id` dado, para repetir un pedido en las pruebas.
+- Qué no hace: no elige entre bordes ni pasa al otro si uno no responde o rechaza (F1-S07). No habla con el origen.
+- Tareas: F1-S03.
+- Implementa: Samy. Revisa: Rubén (pendiente).
+
+### Método `pedir`
+
+| | |
+| --- | --- |
+| Entra | `recurso`; `pedido_id` opcional |
+| Sale | Dict `resultado`, `version`, `contenido`, `fuente`, `pedido_id` |
+| Si el otro nodo no contesta | Hoy espera; el paso a otro borde es F1-S07 |
+
+## fase1/arrancar_borde.py
+
+- Qué es: script de arranque de F1-S01.
+- Qué hace: `ray.init()`, crea `Origen` y `Borde("borde-1")`, llama a `listo()` de los dos y muestra `estado()` vacío. Se corre con `python3 -m fase1.arrancar_borde`.
+- Tareas: F1-S01. Implementa: Samy. Revisa: Rubén (pendiente).
+
+## fase1/arrancar_sistema.py
+
+- Qué es: arranque del sistema completo de la fase 1.
+- Qué hace: crea origen, `borde-1`, `borde-2` y `cliente` (cuatro procesos), llama a `listo()` de cada uno y hace un pedido de `apunte.txt` por el cliente. Se corre con `python3 -m fase1.arrancar_sistema`. Un pedido deja hoy estas cuatro líneas, una por nodo, con el mismo `pedido_id`:
+
+```text
+11:29:00.725 cliente pedido=f3cb77 solicitud recurso=apunte.txt fuente=borde-1
+11:29:00.728 borde-1 pedido=f3cb77 pide_origen recurso=apunte.txt
+11:29:00.732 origen  pedido=f3cb77 responde recurso=apunte.txt version=1
+11:29:00.736 cliente pedido=f3cb77 respuesta version=1 resultado=miss fuente=borde-1
+```
+
+- Qué no hace: no es la corrida del checklist (F1-J06).
+- Tareas: F1-S03. Implementa: Samy. Revisa: Rubén (pendiente).

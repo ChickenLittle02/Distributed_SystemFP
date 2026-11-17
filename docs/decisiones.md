@@ -131,3 +131,23 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Dónde está en el código: `fase1/origen.py`, `fase1/arrancar_origen.py`.
 - Implementa: Rubén
 - Revisa: Samy (pendiente)
+
+### 2026-11-17 — Borde y cliente como actores Ray; el selector, junto al cliente
+
+- Decisión: el borde y el cliente son actores Ray (`@ray.remote`), uno por proceso, igual que el origen. El cliente recibe los handles de los bordes al crearse. La selección de fuente no es un nodo: será un módulo que vive junto al cliente (F1-S07), como dice `docs/contrato.md` («la selección, que vive junto al cliente, escoge la fuente»).
+- Alternativas consideradas: cliente como script del lado del usuario sin actor; selector como un actor aparte al que el cliente le pregunta.
+- Por qué esta: la fase 1 tiene que correr en varios procesos de verdad, y el cliente es «un proceso distinto del origen y de los bordes» (contrato). Un selector como nodo aparte sería un componente inventado solo para la fase 1 y un punto más de fallo que el README no pide.
+- Qué no resuelve: hoy el cliente pide siempre al primer borde de la lista y espera sin límite. El paso a otro borde y el tiempo de espera son F1-S07 y F1-S09.
+- Dónde está en el código: `fase1/borde.py`, `fase1/cliente.py`, `fase1/arrancar_sistema.py`.
+- Implementa: Samy
+- Revisa: Rubén (pendiente)
+
+### 2026-11-17 — La configuración en un solo archivo, con sobreescritura por entorno
+
+- Decisión: TTL, `STALE_LIMIT`, capacidad, política de expulsión, tiempo de espera, `cifrado` y el orden de los bordes viven en `fase1/config.py` (`Config`). Los cuatro números se pueden cambiar con variables de entorno `P20_*` para una corrida corta de prueba, sin tocar el código.
+- Alternativas consideradas: constantes repartidas en cada archivo; argumentos de línea de comandos en cada script de arranque.
+- Por qué esta: la guía (parte 6) pide que «esos valores vivan juntos, para poder cambiarlos sin buscarlos por todo el código», y las notas del profesor del Lab 0 piden que la configuración esté a la vista y se pase como parámetro, no escondida en el código. El entorno es la forma más corta de hacerlo sin cambiar la firma de los actores.
+- Qué no resuelve: los valores siguen siendo provisionales (decisiones del 16 nov). La lista de bordes es estática: es el arranque estático que el tablero da por válido si queda justificado, y queda justificado aquí: en la fase 1 el descubrimiento lo hace Ray con los handles, y en la fase 2 la lista pasará a direcciones en la configuración.
+- Dónde está en el código: `fase1/config.py`.
+- Implementa: Samy
+- Revisa: Rubén (pendiente)

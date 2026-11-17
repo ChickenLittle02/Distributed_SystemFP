@@ -84,9 +84,9 @@ Corrida objetivo: un origen, dos bordes y un cliente, en varios procesos.
 
 ### Samy
 
-- [ ] **F1-S01** Arranque de Ray en local: un borde vacío corre. (plan 16–17 nov)
-- [ ] **F1-S02** Borrador de `docs/diagrama.md`: componentes de la aplicación y qué parte de Ray usa cada uno. Rubén revisa. (plan 16–17 nov)
-- [ ] **F1-S03** Esqueleto del actor borde y del cliente. Rubén revisa. (plan 16–17 nov)
+- [~] **F1-S01** Arranque de Ray en local: un borde vacío corre. (plan 16–17 nov) `python3 -m fase1.arrancar_borde` crea origen y `borde-1`, deja `listo` en `logs/borde-1.log` y muestra el estado vacío. Documentado en `docs/codigo.md`. Falta la revisión de Rubén.
+- [~] **F1-S02** Borrador de `docs/diagrama.md`: componentes de la aplicación y qué parte de Ray usa cada uno. Rubén revisa. (plan 16–17 nov) Borrador escrito: procesos, tabla componente/Ray y lo que Ray decide por nosotros. Falta la revisión de Rubén.
+- [~] **F1-S03** Esqueleto del actor borde y del cliente. Rubén revisa. (plan 16–17 nov) `fase1/borde.py` (reenvía al origen, sin copias), `fase1/cliente.py` (pedido_id, solicitud, respuesta), `fase1/config.py` y `fase1/arrancar_sistema.py` (origen + 2 bordes + cliente, un pedido de prueba). Documentado en `docs/codigo.md` y `docs/decisiones.md`. Falta la revisión de Rubén.
 - [ ] **F1-S04** Borde: miss, bajada desde el origen, `guarda` y hit. Anota `miss`, `hit`, `pide_origen` y `guarda`. Rubén revisa. (plan 18–20 nov)
 - [ ] **F1-S05** TTL y estado fresca / obsoleta en el borde. Rubén revisa. (plan 21–22 nov) El TTL provisional ya está en 30 segundos, en `docs/contrato.md`.
 - [ ] **F1-S06** Expulsión LRU con capacidad pequeña, visible en el log. Rubén revisa. (plan 21–22 nov)
