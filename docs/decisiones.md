@@ -1,0 +1,113 @@
+# Decisiones
+
+Cada entrada la escribe quien implementa. La otra persona la revisa y, si no puede explicarla con sus palabras, la pieza sigue abierta.
+
+### 2026-11-16 — STALE_LIMIT provisional de 1 minuto
+
+- Decisión: `STALE_LIMIT = 60` segundos (1 minuto) mientras se desarrolla y se prueba el prototipo.
+- Alternativas consideradas: 10 minutos, que es el ejemplo del README; dejar el número sin fijar hasta el experimento de partición.
+- Por qué esta: con 10 minutos hay que esperar demasiado para ver, en una corrida local, una copia servida dentro del límite y otra rechazada por encima. Un minuto basta para distinguir las dos ramas.
+- Qué no resuelve: no es el valor de la entrega ni de la defensa. Es provisional para poder ejecutar el programa sin esa espera. El número definitivo se vuelve a decidir al cerrar la regla de obsoleto y el experimento de partición.
+- Dónde está en el código: todavía no hay código. Cuando existan el origen y el borde, el valor sale de la configuración y la regla lo lee de ahí.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-16 — Fase 1 en Python con Ray
+
+- Decisión: el prototipo de la fase 1 se escribe en Python y usa Ray para correr el origen, los bordes y el cliente en procesos separados.
+- Alternativas consideradas: escribir ya el transporte TCP en el lenguaje de la fase 2; usar otro runtime de actores.
+- Por qué esta: la fase 1 tiene que ejecutarse de verdad en varios procesos y dejar escrito qué aporta Ray (el arranque de esos procesos y la llamada de uno a otro). La caché, las versiones, la invalidación y la regla de obsoleto se escriben en este repositorio. El diseño sin Ray es la fase 2.
+- Qué no resuelve: Ray no decide el hit, el miss, la expulsión, la invalidación ni `STALE_LIMIT`. Esas reglas no se delegan en una biblioteca de caché. `enviar` y `recibir` sobre TCP quedan para la fase 2.
+- Dónde está en el código: todavía no hay código. El primer uso es el arranque del actor origen.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-16 — El cliente pide por nombre y no elige el borde
+
+- Decisión: el cliente es un proceso distinto del origen y de los bordes. Pide un recurso por su nombre y un `pedido_id` que él crea. No envía un borde preferido. La selección escoge la fuente y el historial la anota como `fuente`.
+- Alternativas consideradas: que el cliente nombre el borde en el pedido, como si `fuente=borde-1` fuera un dato de entrada.
+- Por qué esta: en una caché normal quien pide el archivo nombra la URL; otro componente elige el nodo de borde. El ejemplo del README anota la fuente en la línea `solicitud`, que es el borde ya elegido.
+- Qué no resuelve: no fija el orden ni el criterio fino de la selección. Si el primer borde no puede servir y el origen no contesta, la regla de `rechaza` ya dice que se prueba el otro borde. La política concreta la implementa Samy.
+- Dónde está en el código: `docs/contrato.md`. Todavía no hay programa cliente.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-16 — La respuesta incluye el contenido del archivo
+
+- Decisión: además de `version` y `resultado`, la respuesta al cliente lleva `contenido`, los bytes del archivo. `hit`, `miss` y `sirve_obsoleta` traen esos bytes. `rechaza` no trae contenido. El historial sigue sin guardar el archivo.
+- Alternativas consideradas: devolver solo la versión y el resultado, y dejar el archivo fuera de esta fase.
+- Por qué esta: el sistema reparte un archivo. La versión y el resultado dicen qué pasó; el contenido es lo que el cliente vino a buscar. El borde tiene que guardar el archivo, no solo el nombre y la versión.
+- Qué no resuelve: no enumera los fallos. Esos casos están en las entradas siguientes y en `docs/contrato.md`. `file_doesnt_exist` tampoco trae contenido.
+- Dónde está en el código: `docs/contrato.md`.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-16 — `rechaza` solo cuando ninguna fuente entrega el archivo
+
+- Decisión: si el primer borde no puede servir el recurso y el origen no contesta, la selección prueba el otro borde. Una copia fresca en ese otro borde es `hit`. El origen contestando con el archivo es `miss`. Una copia no invalidada dentro de `STALE_LIMIT`, con el origen en silencio, es `sirve_obsoleta`. `rechaza` queda para cuando los dos bordes y el origen no pueden entregar el archivo.
+- Alternativas consideradas: rechazar en cuanto el primer borde no tiene una copia usable, sin preguntar al otro.
+- Por qué esta: en una caché normal un nodo caído o vacío no es el final del pedido. Otro borde puede tener el archivo. El cliente ve el fallo cuando ya no queda fuente.
+- Qué no resuelve: no fija el orden entre los bordes ni la política cuando hay más de dos. La fase 1 corre con dos bordes. La política concreta de selección la implementa Samy.
+- Dónde está en el código: `docs/contrato.md`.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-16 — Una copia invalidada no se sirve si el origen no contesta
+
+- Decisión: si el origen invalidó una copia y el borde no logra hablar con el origen para bajar la versión nueva, esa copia no se responde. `STALE_LIMIT` no la habilita. El cliente la recibe solo si otra fuente entrega un archivo que sí se puede usar. Si el origen contesta, el borde baja la versión nueva y el resultado es `miss`.
+- Alternativas consideradas: tratar la copia invalidada como una copia vencida y servirla dentro de `STALE_LIMIT`.
+- Por qué esta: en una caché normal la invalidación es una orden de no servir esa versión. El límite de obsolescencia cubre una copia vencida o una revalidación que no pudo hacerse, no una versión que el origen mandó quitar.
+- Qué no resuelve: no describe cómo se simula el aviso perdido. Ese caso sigue en el borde que no recibió la invalidación: su copia no está invalidada y sigue la regla de frescura.
+- Dónde está en el código: `docs/contrato.md`.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-16 — El origen dice que el archivo no existe
+
+- Decisión: si el origen contesta y el recurso no está, el resultado del cliente es `file_doesnt_exist` («file doesn't exist»). No hay versión ni contenido. El borde borra esa copia en ese momento; la regla está en la entrada de borrado.
+- Alternativas consideradas: usar `rechaza` para este caso y mantener solo los cuatro resultados del README.
+- Por qué esta: `rechaza` en este proyecto es «había algo que decidir y ninguna fuente pudo entregarlo». Aquí el origen sí contestó y dijo que el archivo no existe. El token va sin espacios para poder escribirlo en la línea de historial: `resultado=file_doesnt_exist`.
+- Qué no resuelve: no se usa este resultado cuando el origen está en silencio. En ese caso siguen `sirve_obsoleta` y `rechaza`.
+- Dónde está en el código: `docs/contrato.md`.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-16 — TTL provisional de 30 segundos
+
+- Decisión: una copia está fresca durante `TTL = 30` segundos desde que se guarda o desde que el origen confirma la misma versión. Después queda obsoleta. `STALE_LIMIT` sigue midiendo solo el tiempo que lleva obsoleta.
+- Alternativas consideradas: un TTL de varios minutos, como en una caché pública; no fijar el número hasta el experimento.
+- Por qué esta: 30 segundos dejan ver una copia fresca, el paso a obsoleta y las dos ramas de `STALE_LIMIT` (60 segundos) sin alargar la corrida. Es provisional, igual que el límite.
+- Qué no resuelve: no es el valor de la entrega. Se vuelve a mirar al cerrar el experimento de partición.
+- Dónde está en el código: `docs/contrato.md`. Cuando exista el borde, el valor sale de la configuración.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-16 — Misma versión en la revalidación es `hit`
+
+- Decisión: si el borde pregunta al origen y el origen confirma la misma versión, el resultado del cliente es `hit`. La copia permanece y el TTL vuelve a empezar. `miss` queda para cuando el origen entrega otro contenido.
+- Alternativas consideradas: anotar `miss` cada vez que el borde tuvo que preguntar al origen, aunque el archivo no cambiara.
+- Por qué esta: en una caché normal esa respuesta confirma la copia que ya estaba. El cliente recibe el archivo del borde. El historial del borde puede llevar además la línea `revalida`.
+- Qué no resuelve: no cambia `sirve_obsoleta` ni `rechaza`, que siguen siendo los casos en los que el origen no contesta.
+- Dónde está en el código: `docs/contrato.md`.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-16 — Cuándo el borde borra una copia
+
+- Decisión: el borde borra la copia al momento en tres casos. El origen, al pedirla el borde, responde que ya no está. Llega la invalidación de esa copia. La edad obsoleta pasó `STALE_LIMIT` y el origen responde que esa copia es obsoleta; si además entrega una versión nueva, el borde guarda esa y el cliente ve `miss`. Si el origen sigue en silencio, la copia no se borra. Solo puede salir por expulsión LRU cuando el borde se llena.
+- Alternativas consideradas: borrarla 1 o 2 minutos después de saber que el origen ya no la tiene; borrarla en cuanto pasa el TTL; borrarla también cuando pasó `STALE_LIMIT` y el origen sigue en silencio.
+- Por qué esta: la copia se quita cuando el borde ya sabe que no debe guardarla. El silencio del origen no es esa noticia: durante `STALE_LIMIT` esa copia es la que se sirve, y pasada esa edad el proyecto aún la conserva hasta que LRU necesite el sitio o el origen hable.
+- Qué no resuelve: no elige qué copia saca LRU ni la capacidad del borde. Eso lo implementa Samy.
+- Dónde está en el código: `docs/contrato.md`.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-16 — Archivos del origen en carpeta local
+
+- Decisión: el origen lee los archivos de la carpeta local `contenido/`. Cada archivo que aparece ahí empieza en versión `1`. Cuando el contenido de ese archivo cambia, la versión sube en `1`. Si el archivo se borra de la carpeta, el origen responde `file_doesnt_exist`.
+- Alternativas consideradas: generar el contenido en memoria; numerar versiones a mano en un archivo aparte; subir la versión en saltos mayores.
+- Por qué esta: se puede editar o borrar un archivo del disco y provocar miss, revalidación, invalidación y `file_doesnt_exist` sin inventar un almacén. Empezar en 1 y subir de 1 en 1 deja las versiones visibles en el historial.
+- Qué no resuelve: no dice todavía cómo el origen detecta el cambio (hash del contenido, fecha de modificación, o ambos). Eso se cierra al implementar F1-R05.
+- Dónde está en el código: `contenido/`. El origen todavía no está escrito.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
