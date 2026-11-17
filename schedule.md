@@ -70,11 +70,11 @@ Corrida objetivo: un origen, dos bordes y un cliente, en varios procesos.
 
 ### Rubén
 
-- [ ] **F1-R01** Arranque de Ray en local: un origen vacío corre. (plan 16–17 nov)
+- [~] **F1-R01** Arranque de Ray en local: un origen vacío corre. (plan 16–17 nov) `python3 -m fase1.arrancar_origen` crea el actor y deja `listo` en `logs/origen.log`. Documentado en `docs/codigo.md`. Falta la revisión de Samy.
 - [~] **F1-R02** `docs/contrato.md`: operaciones visibles (pedir un recurso, recibir versión y resultado), sin nombres internos de Ray. Samy revisa. (plan 16–17 nov) El texto ya cubre `rechaza` y `file_doesnt_exist`. Falta la revisión de Samy.
 - [~] **F1-R03** Esqueleto de `registrar` con el formato del README. Samy revisa. (plan 16–17 nov) Código en `fase1/registro.py`. Documentado en `docs/codigo.md`. Falta la revisión de Samy.
-- [ ] **F1-R04** Esqueleto del actor origen. Samy revisa. (plan 16–17 nov)
-- [ ] **F1-R05** El origen guarda versiones, responde un recurso y anota `responde`. Samy revisa. (plan 18–20 nov)
+- [~] **F1-R04** Esqueleto del actor origen. Samy revisa. (plan 16–17 nov) Actor en `fase1/origen.py`. Documentado en `docs/codigo.md`. Falta la revisión de Samy.
+- [~] **F1-R05** El origen guarda versiones, responde un recurso y anota `responde`. Samy revisa. (plan 18–20 nov) `responder` en `fase1/origen.py` lee `contenido/`, versiona por hash y anota. Documentado en `docs/codigo.md`. Falta la revisión de Samy.
 - [ ] **F1-R06** Invalidación desde el origen, con la lista de bordes avisados. Samy la aplica en el borde. (plan 21–22 nov)
 - [ ] **F1-R07** Caso en que un borde no recibe el aviso, anotado en el historial. Samy revisa. (plan 21–22 nov)
 - [ ] **F1-R08** Revalidación del lado origen: misma versión o versión nueva. Samy revisa. (plan 23–24 nov)

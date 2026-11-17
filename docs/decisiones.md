@@ -107,7 +107,27 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Decisión: el origen lee los archivos de la carpeta local `contenido/`. Cada archivo que aparece ahí empieza en versión `1`. Cuando el contenido de ese archivo cambia, la versión sube en `1`. Si el archivo se borra de la carpeta, el origen responde `file_doesnt_exist`.
 - Alternativas consideradas: generar el contenido en memoria; numerar versiones a mano en un archivo aparte; subir la versión en saltos mayores.
 - Por qué esta: se puede editar o borrar un archivo del disco y provocar miss, revalidación, invalidación y `file_doesnt_exist` sin inventar un almacén. Empezar en 1 y subir de 1 en 1 deja las versiones visibles en el historial.
-- Qué no resuelve: no dice todavía cómo el origen detecta el cambio (hash del contenido, fecha de modificación, o ambos). Eso se cierra al implementar F1-R05.
-- Dónde está en el código: `contenido/`. El origen todavía no está escrito.
+- Qué no resuelve: cómo se detecta el cambio quedó en la entrada del hash.
+- Dónde está en el código: `contenido/` y `fase1/origen.py` (`responder`, `_version_y_bytes`).
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-16 — Hash del contenido para subir la versión
+
+- Decisión: la única señal para subir la versión de un archivo en el origen es el hash de su contenido (SHA-256 de los bytes). El origen guarda la última huella vista junto con la versión. Si al leer el archivo la huella es distinta, el contenido cambió y la versión sube en `1`. La fecha de modificación del disco no se usa.
+- Alternativas consideradas: usar solo la fecha de modificación (`mtime`); usar fecha y, si cambió, confirmar con hash.
+- Por qué esta: la versión tiene que reflejar el contenido que se reparte. El hash solo sube cuando los bytes cambian de verdad. La fecha sola puede subir la versión con un `touch` sin cambio, o fallar al copiar un archivo con fecha antigua. Con pocos archivos chicos en `contenido/`, hashear en cada lectura es aceptable.
+- Qué no resuelve: no cifra ni firma el archivo; solo detecta cambio.
+- Dónde está en el código: `fase1/origen.py`, estado `_versiones` (versión + hash) y `_version_y_bytes`.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-16 — Origen como actor Ray
+
+- Decisión: el origen de la fase 1 es un actor Ray (`@ray.remote`) en `fase1/origen.py`. Se arranca en local con `fase1/arrancar_origen.py`. Confirma que vive con `listo` y reparte archivos con `responder`.
+- Alternativas consideradas: un proceso Python sin Ray; un script que solo importa Ray sin crear actor.
+- Por qué esta: la fase 1 tiene que correr varios procesos de verdad. El actor es el proceso origen que el borde llamará.
+- Qué no resuelve: todavía no invalida bordes (F1-R06) ni tiene la API fina de revalidación (F1-R08). La línea `listo` sigue siendo solo prueba de arranque.
+- Dónde está en el código: `fase1/origen.py`, `fase1/arrancar_origen.py`.
 - Implementa: Rubén
 - Revisa: Samy (pendiente)
