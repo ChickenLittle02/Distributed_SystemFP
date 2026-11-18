@@ -19,11 +19,11 @@ fase1/
   config.py             Números y listas de la corrida (TTL, STALE_LIMIT, bordes...)
   registro.py           Historial compartido (registrar)
   origen.py             Actor origen: versiones y responder
-  borde.py              Actor borde: hoy reenvía al origen (esqueleto)
+  borde.py              Actor borde: copias en memoria; miss, pide_origen, guarda, hit
   cliente.py            Actor cliente: pedido_id, solicitud y respuesta (esqueleto)
   arrancar_origen.py    Arranca Ray y prueba listo + responder
   arrancar_borde.py     Arranca Ray, origen y un borde vacío
-  arrancar_sistema.py   Arranca origen, dos bordes y cliente, y hace un pedido
+  arrancar_sistema.py   Arranca origen, dos bordes y cliente; tres pedidos (miss, hit, file_doesnt_exist)
 contenido/
   apunte.txt            Archivo de prueba que reparte el origen
 logs/                   Historial en disco (no se versiona)
@@ -38,7 +38,7 @@ docs/
 - Dónde: `fase1/registro.py`.
 - Qué hace: `registrar(nodo, pedido_id, operacion, **datos)` arma una línea con hora, nodo, `pedido=…`, operación y los pares `clave=valor`, la imprime en consola y la agrega a `logs/<nodo>.log`. Crea `logs/` si no existe.
 - Qué no hace: no decide hit, miss, invalidación ni `STALE_LIMIT`. No abre sockets. No guarda el contenido de los archivos repartidos.
-- Quién lo usa: el origen (`listo`, `responder`). Más adelante, borde y cliente.
+- Quién lo usa: el origen (`listo`, `responder`), el borde (`listo`, `miss`, `pide_origen`, `guarda`, `hit`) y el cliente (`listo`, `solicitud`, `respuesta`).
 - Tarea: F1-R03.
 - Implementa: Rubén. Revisa: Samy (pendiente).
 
@@ -141,11 +141,11 @@ python3 -m fase1.arrancar_origen
 
 ## fase1/borde.py
 
-- Qué es: el actor Ray del borde, la caché cercana al cliente. Hoy es un esqueleto: el «borde que reenvía» de la guía (parte 6, paso 2).
-- Dónde: `fase1/borde.py`, clase `Borde`.
-- Qué hace: `pedir(pedido_id, recurso)` anota `pide_origen`, llama a `origen.responder` y devuelve `miss` con versión y contenido, o `file_doesnt_exist`. `estado()` devuelve las copias (vacío por ahora).
-- Qué no hace: no guarda copias, así que no hay `hit` (F1-S04), ni TTL (F1-S05), ni expulsión (F1-S06), ni revalidación (F1-S08), ni `STALE_LIMIT` ni tiempo de espera al origen (F1-S09), ni `invalidar` (lo aplica el borde cuando exista F1-R06).
-- Tareas: F1-S01, F1-S03.
+- Qué es: el actor Ray del borde, la caché cercana al cliente. Desde F1-S04 guarda copias: es el «borde con caché» de la guía (parte 6, paso 3).
+- Dónde: `fase1/borde.py`, clase `Borde` y dataclass `Copia`.
+- Qué hace: lleva `_copias` (recurso → `Copia` con `version`, `contenido` y `guardada_en`) en la memoria del actor. `pedir(pedido_id, recurso)`: si hay copia, anota `hit` y la entrega sin hablar con el origen; si no, anota `miss causa=no_esta`, anota `pide_origen`, llama a `origen.responder`, guarda lo que baja con `_guardar` (anota `guarda` con versión y bytes) y responde `miss`. Si el origen dice que el archivo no existe, borra la copia de ese nombre si la hubiera (contrato) y responde `file_doesnt_exist`. `estado()` devuelve recurso → `{version, guardada}`.
+- Qué no hace: no hay TTL, así que toda copia guardada cuenta como usable y nunca revalida (F1-S05, F1-S08); no hay tope de capacidad ni expulsión (F1-S06); espera al origen sin límite, sin `STALE_LIMIT` (F1-S09); no aplica `invalidar` (cuando exista F1-R06). La caché vive solo en memoria: si el actor muere, arranca vacío.
+- Tareas: F1-S01, F1-S03, F1-S04.
 - Implementa: Samy. Revisa: Rubén (pendiente).
 
 ### Método `listo`
@@ -163,14 +163,27 @@ Deja `listo capacidad=2 ttl=30 stale_limit=60` en `logs/borde-1.log`.
 | | |
 | --- | --- |
 | Entra | `pedido_id` (del cliente) y `recurso` |
-| Sale | Dict `resultado`, `version`, `contenido` con el formato de `docs/contrato.md` |
+| Sale | Dict `resultado` (`hit`, `miss` o `file_doesnt_exist`), `version`, `contenido`, con el formato de `docs/contrato.md` |
 | Si el otro nodo no contesta | Hoy espera sin límite; el tiempo de espera llega con F1-S09 |
 
-Historial de hoy:
+Historial de un miss seguido de un hit del mismo recurso (dos `pedido_id`):
 
 ```text
-borde-1 pedido=f3cb77 pide_origen recurso=apunte.txt
+09:16:31.904 borde-1 pedido=410d11 miss recurso=apunte.txt causa=no_esta
+09:16:31.905 borde-1 pedido=410d11 pide_origen recurso=apunte.txt
+09:16:31.912 borde-1 pedido=410d11 guarda recurso=apunte.txt version=1 bytes=50
+09:16:31.920 borde-1 pedido=467a42 hit recurso=apunte.txt version=1
 ```
+
+`causa` en la línea `miss` dice por qué no se usó la copia. Hoy solo existe `no_esta`; con el TTL llegará `expirada` (F1-S05) y con la invalidación `invalidada`.
+
+### Método `estado`
+
+| | |
+| --- | --- |
+| Entra | Nada |
+| Sale | Dict recurso → `{version, guardada}` (hora de guardado). Vacío si no hay copias |
+| Si el otro nodo no contesta | No aplica |
 
 ## fase1/cliente.py
 
@@ -198,14 +211,24 @@ borde-1 pedido=f3cb77 pide_origen recurso=apunte.txt
 ## fase1/arrancar_sistema.py
 
 - Qué es: arranque del sistema completo de la fase 1.
-- Qué hace: crea origen, `borde-1`, `borde-2` y `cliente` (cuatro procesos), llama a `listo()` de cada uno y hace un pedido de `apunte.txt` por el cliente. Se corre con `python3 -m fase1.arrancar_sistema`. Un pedido deja hoy estas cuatro líneas, una por nodo, con el mismo `pedido_id`:
+- Qué hace: crea origen, `borde-1`, `borde-2` y `cliente` (cuatro procesos), llama a `listo()` de cada uno y hace tres pedidos por el cliente: `apunte.txt` dos veces (el primero es `miss`, el segundo `hit`) y `no-existe.txt` (`file_doesnt_exist`). Al final imprime `estado()` del borde preferido. Se corre con `python3 -m fase1.arrancar_sistema`. El primer pedido deja estas líneas, con el mismo `pedido_id` en los tres nodos:
 
 ```text
-11:29:00.725 cliente pedido=f3cb77 solicitud recurso=apunte.txt fuente=borde-1
-11:29:00.728 borde-1 pedido=f3cb77 pide_origen recurso=apunte.txt
-11:29:00.732 origen  pedido=f3cb77 responde recurso=apunte.txt version=1
-11:29:00.736 cliente pedido=f3cb77 respuesta version=1 resultado=miss fuente=borde-1
+09:16:31.899 cliente pedido=410d11 solicitud recurso=apunte.txt fuente=borde-1
+09:16:31.904 borde-1 pedido=410d11 miss recurso=apunte.txt causa=no_esta
+09:16:31.905 borde-1 pedido=410d11 pide_origen recurso=apunte.txt
+09:16:31.909 origen  pedido=410d11 responde recurso=apunte.txt version=1
+09:16:31.912 borde-1 pedido=410d11 guarda recurso=apunte.txt version=1 bytes=50
+09:16:31.914 cliente pedido=410d11 respuesta version=1 resultado=miss fuente=borde-1
 ```
 
-- Qué no hace: no es la corrida del checklist (F1-J06).
-- Tareas: F1-S03. Implementa: Samy. Revisa: Rubén (pendiente).
+El segundo pedido deja solo dos líneas en el borde y el cliente; el origen no interviene:
+
+```text
+09:16:31.918 cliente pedido=467a42 solicitud recurso=apunte.txt fuente=borde-1
+09:16:31.920 borde-1 pedido=467a42 hit recurso=apunte.txt version=1
+09:16:31.923 cliente pedido=467a42 respuesta version=1 resultado=hit fuente=borde-1
+```
+
+- Qué no hace: no es la corrida del checklist (F1-J06): falta TTL, expulsión y la regla de obsoleto.
+- Tareas: F1-S03, F1-S04. Implementa: Samy. Revisa: Rubén (pendiente).

@@ -151,3 +151,13 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Dónde está en el código: `fase1/config.py`.
 - Implementa: Samy
 - Revisa: Rubén (pendiente)
+
+### 2026-11-18 — La copia del borde vive en memoria, con versión, bytes y hora de guardado
+
+- Decisión: el borde guarda cada copia como `Copia(version, contenido, guardada_en)` en un diccionario en la memoria del actor (`_copias`). Un pedido con copia es `hit` y no toca el origen. Un pedido sin copia anota `miss causa=no_esta`, luego `pide_origen`, baja el archivo, anota `guarda` y responde `miss`. Si el origen contesta `file_doesnt_exist`, el borde borra la copia de ese nombre, como dice el contrato. La línea `miss` lleva `causa` para que, cuando lleguen TTL e invalidación, el historial diga por qué no sirvió la copia (`no_esta`, `expirada`, `invalidada`).
+- Alternativas consideradas: guardar las copias en disco (`logs/` o una carpeta `cache/` por borde) para que sobrevivan al reinicio del actor; guardar solo nombre y versión y volver a bajar el contenido en cada hit.
+- Por qué esta: la fase 1 solo tiene que mostrar los comportamientos de caché, y la guía (parte 6, paso 3) describe el borde como «guarda lo que baja y lo entrega si lo tiene». Guardar los bytes es lo que hace que el hit no hable con el origen; sin ellos no habría hit de verdad. Una caché solo en memoria es la descripción honesta que pide el tablero para la ficha de reinicio (F3-S03): si el borde muere, arranca vacío y el primer pedido es `miss`.
+- Qué no resuelve: la copia no tiene expiración ni estado fresca/obsoleta (F1-S05), no hay tope de capacidad ni expulsión (F1-S06), el borde no revalida (F1-S08) ni aplica `STALE_LIMIT` (F1-S09) y no sobrevive al reinicio del actor. `guardada_en` queda puesto para que el TTL cuente desde ahí.
+- Dónde está en el código: `fase1/borde.py` (`Copia`, `_copias`, `pedir`, `_guardar`, `estado`). La corrida de `fase1/arrancar_sistema.py` muestra miss, hit y `file_doesnt_exist` seguidos.
+- Implementa: Samy
+- Revisa: Rubén (pendiente)

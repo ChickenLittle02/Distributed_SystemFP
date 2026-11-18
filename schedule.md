@@ -87,7 +87,7 @@ Corrida objetivo: un origen, dos bordes y un cliente, en varios procesos.
 - [~] **F1-S01** Arranque de Ray en local: un borde vacío corre. (plan 16–17 nov) `python3 -m fase1.arrancar_borde` crea origen y `borde-1`, deja `listo` en `logs/borde-1.log` y muestra el estado vacío. Documentado en `docs/codigo.md`. Falta la revisión de Rubén.
 - [~] **F1-S02** Borrador de `docs/diagrama.md`: componentes de la aplicación y qué parte de Ray usa cada uno. Rubén revisa. (plan 16–17 nov) Borrador escrito: procesos, tabla componente/Ray y lo que Ray decide por nosotros. Falta la revisión de Rubén.
 - [~] **F1-S03** Esqueleto del actor borde y del cliente. Rubén revisa. (plan 16–17 nov) `fase1/borde.py` (reenvía al origen, sin copias), `fase1/cliente.py` (pedido_id, solicitud, respuesta), `fase1/config.py` y `fase1/arrancar_sistema.py` (origen + 2 bordes + cliente, un pedido de prueba). Documentado en `docs/codigo.md` y `docs/decisiones.md`. Falta la revisión de Rubén.
-- [ ] **F1-S04** Borde: miss, bajada desde el origen, `guarda` y hit. Anota `miss`, `hit`, `pide_origen` y `guarda`. Rubén revisa. (plan 18–20 nov)
+- [~] **F1-S04** Borde: miss, bajada desde el origen, `guarda` y hit. Anota `miss`, `hit`, `pide_origen` y `guarda`. Rubén revisa. (plan 18–20 nov) `fase1/borde.py` guarda copias en memoria (`Copia`: versión, bytes, hora); `pedir` anota `miss causa=no_esta`, `pide_origen`, `guarda` y, en el segundo pedido, `hit` sin tocar el origen. `python3 -m fase1.arrancar_sistema` hace miss → hit → `file_doesnt_exist`. Documentado en `docs/codigo.md` y `docs/decisiones.md`. Falta la revisión de Rubén.
 - [ ] **F1-S05** TTL y estado fresca / obsoleta en el borde. Rubén revisa. (plan 21–22 nov) El TTL provisional ya está en 30 segundos, en `docs/contrato.md`.
 - [ ] **F1-S06** Expulsión LRU con capacidad pequeña, visible en el log. Rubén revisa. (plan 21–22 nov)
 - [ ] **F1-S07** Selección de fuente: si un borde no responde, el cliente usa el otro. Rubén revisa. (plan 21–22 nov)
@@ -100,7 +100,7 @@ Corrida objetivo: un origen, dos bordes y un cliente, en varios procesos.
 ### Los dos
 
 - [~] **F1-J01** Primera entrada de `docs/decisiones.md`: lenguaje Python + Ray, y el valor inicial de `STALE_LIMIT`. (plan 16–17 nov) Las dos entradas están escritas. Falta la revisión de Samy.
-- [ ] **F1-J02** Un cliente pide un recurso desconocido y el segundo pedido es hit. El historial se filtra por `pedido_id`. (plan 18–20 nov)
+- [ ] **F1-J02** Un cliente pide un recurso desconocido y el segundo pedido es hit. El historial se filtra por `pedido_id`. (plan 18–20 nov) La corrida de `fase1/arrancar_sistema.py` ya lo hace (18 nov, ver `docs/codigo.md`); falta mirarlo juntos y filtrar `logs/*.log` por `pedido_id`.
 - [ ] **F1-J03** `registrar` está activo desde la primera operación, con el formato del README. `cifrado = false`.
 - [ ] **F1-J04** Cada archivo de código de esta fase tiene comentario de cabecera, cada función pública tiene su línea de funcionamiento, y `docs/codigo.md` describe todas las piezas de esta fase.
 - [ ] **F1-J05** Los resultados del cliente existen: `hit`, `miss`, `sirve_obsoleta`, `rechaza`, `file_doesnt_exist`. (plan 23–24 nov)

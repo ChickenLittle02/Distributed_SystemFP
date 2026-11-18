@@ -3,7 +3,9 @@
 Componentes de la aplicación y qué parte de Ray usa cada uno. Lo que es del
 proyecto está en `fase1/`; lo que pone Ray está marcado. Este borrador se
 completa cuando el borde tenga caché (F1-S04 en adelante) y se cierra con
-`docs/mapa-ray.md` (F1-S11).
+`docs/mapa-ray.md` (F1-S11). Desde el 18 nov (F1-S04) el borde ya guarda copias
+en su memoria; lo que no cambia es el camino de una llamada: cliente → borde →
+origen, y en un `hit` el camino se corta en el borde.
 
 ## Los procesos
 
@@ -22,7 +24,8 @@ completa cuando el borde tenga caché (F1-S04 en adelante) y se cierra con
 ┌───────┴────────┐          ┌────────┴───────┐         │
 │    BORDE-1     │          │    BORDE-2     │◄────────┘
 │ fase1/borde.py │          │ fase1/borde.py │   (hoy: siempre borde-1;
-│ copias (vacío) │          │ copias (vacío) │    el selector es F1-S07)
+│ copias en      │          │ copias en      │    el selector es F1-S07)
+│ memoria (S04)  │          │ memoria (S04)  │
 └────────────────┘          └────────────────┘
    proceso Ray                 proceso Ray
 
@@ -39,7 +42,7 @@ actores y lanza el pedido. Ese script no es un nodo del sistema.
 | Componente | Lo que es del proyecto | Lo que pone Ray hoy |
 | --- | --- | --- |
 | Origen | versión de referencia por hash, lectura de `contenido/`, `responder` | `@ray.remote`: el proceso donde vive; `responder.remote(...)`: que el borde lo llame desde otro proceso; el estado en memoria (`_versiones`) dura lo que dura el actor |
-| Borde | (hoy) reenviar al origen; (desde F1-S04) copias, TTL, LRU, invalidación, revalidación, `STALE_LIMIT` | `@ray.remote`: proceso propio; `origen.responder.remote` + `ray.get`: la llamada al origen y la espera de la respuesta; (desde F1-S09) `ray.wait(timeout)` para decir «no responde» |
+| Borde | (hoy, F1-S04) copias en memoria, `hit`/`miss`, `guarda`; (desde F1-S05) TTL, LRU, invalidación, revalidación, `STALE_LIMIT` | `@ray.remote`: proceso propio; `origen.responder.remote` + `ray.get`: la llamada al origen y la espera de la respuesta; (desde F1-S09) `ray.wait(timeout)` para decir «no responde» |
 | Cliente | `pedido_id`, orden de preferencia de bordes, `solicitud`/`respuesta` | `@ray.remote`: proceso propio; `borde.pedir.remote` + `ray.get`: la llamada al borde |
 | Registro | formato de la línea, un archivo por nodo | nada: escribe en disco local del proceso |
 | Config | los números y la frase de la política | nada |
