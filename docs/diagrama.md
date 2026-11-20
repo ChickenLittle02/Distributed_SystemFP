@@ -23,9 +23,9 @@ origen, y en un `hit` el camino se corta en el borde.
         │                            │                 │
 ┌───────┴────────┐          ┌────────┴───────┐         │
 │    BORDE-1     │          │    BORDE-2     │◄────────┘
-│ fase1/borde.py │          │ fase1/borde.py │   (hoy: siempre borde-1;
-│ copias en      │          │ copias en      │    el selector es F1-S07)
-│ memoria (S04)  │          │ memoria (S04)  │
+│ fase1/borde.py │          │ fase1/borde.py │   (orden del selector,
+│ copias en mem. │          │ copias en mem. │    fase1/selector.py:
+│ TTL + LRU      │          │ TTL + LRU      │    borde-1, luego borde-2)
 └────────────────┘          └────────────────┘
    proceso Ray                 proceso Ray
 
@@ -42,8 +42,9 @@ actores y lanza el pedido. Ese script no es un nodo del sistema.
 | Componente | Lo que es del proyecto | Lo que pone Ray hoy |
 | --- | --- | --- |
 | Origen | versión de referencia por hash, lectura de `contenido/`, `responder` | `@ray.remote`: el proceso donde vive; `responder.remote(...)`: que el borde lo llame desde otro proceso; el estado en memoria (`_versiones`) dura lo que dura el actor |
-| Borde | (hoy, F1-S04) copias en memoria, `hit`/`miss`, `guarda`; (desde F1-S05) TTL, LRU, invalidación, revalidación, `STALE_LIMIT` | `@ray.remote`: proceso propio; `origen.responder.remote` + `ray.get`: la llamada al origen y la espera de la respuesta; (desde F1-S09) `ray.wait(timeout)` para decir «no responde» |
-| Cliente | `pedido_id`, orden de preferencia de bordes, `solicitud`/`respuesta` | `@ray.remote`: proceso propio; `borde.pedir.remote` + `ray.get`: la llamada al borde |
+| Borde | copias en memoria con TTL (`expira_en`), `hit`/`miss` con causa, `guarda`, `revalida` por comparación de versión, expulsión LRU (F1-S04–S06); (pendiente) invalidación, `STALE_LIMIT` | `@ray.remote`: proceso propio; `origen.responder.remote` + `ray.get`: la llamada al origen y la espera de la respuesta; (desde F1-S09) `ray.wait(timeout)` para decir «no responde» |
+| Selector | orden de preferencia de bordes, memoria de cuál no respondió (F1-S07) | nada: es una clase dentro del proceso del cliente |
+| Cliente | `pedido_id`, `solicitud`/`respuesta`, pasar al siguiente borde si uno no responde o rechaza (F1-S07) | `@ray.remote`: proceso propio; `borde.pedir.remote` + `ray.wait(timeout)`: la llamada al borde con tiempo de espera; `RayActorError` es cómo Ray dice que el borde murió |
 | Registro | formato de la línea, un archivo por nodo | nada: escribe en disco local del proceso |
 | Config | los números y la frase de la política | nada |
 | Arranque | crear los nodos y el pedido de prueba | `ray.init()` levanta el runtime local; `Actor.remote(...)` arranca cada proceso; `ray.shutdown()` los apaga |
@@ -64,6 +65,5 @@ actores y lanza el pedido. Ese script no es un nodo del sistema.
 
 ## Qué no cubre este borrador todavía
 
-- La selección de fuente y el paso a otro borde (F1-S07).
 - La invalidación desde el origen hacia los bordes (F1-R06) y el aviso que no llega (F1-R07).
 - La partición: cómo se corta el camino borde→origen dejando el camino cliente→borde (F1-R09).

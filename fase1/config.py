@@ -20,8 +20,9 @@ from typing import List
 class Config:
     """Valores de la corrida. Entra: nada (o el entorno). Sale: los campos.
 
-    Las variables de entorno P20_TTL, P20_STALE_LIMIT, P20_CAPACIDAD y
-    P20_TIMEOUT permiten acortar una corrida de prueba sin tocar el código.
+    Las variables de entorno P20_TTL, P20_STALE_LIMIT, P20_CAPACIDAD,
+    P20_TIMEOUT y P20_EVITAR_BORDE permiten acortar una corrida de prueba
+    sin tocar el código.
     """
 
     # Una copia recién guardada está fresca este tiempo (segundos).
@@ -37,6 +38,9 @@ class Config:
     # Cuánto espera un nodo la respuesta de otro antes de darlo por no
     # disponible (segundos). Es lo que el proyecto llama «no responde».
     timeout_segundos: float = 2.0
+    # Cuánto tiempo el selector deja al final de la lista a un borde que no
+    # respondió, antes de volver a probarlo primero (segundos). F1-S07.
+    evitar_borde_segundos: float = 10.0
     # El canal va en claro en la fase 1. Ver README, «Transporte y cifrado».
     cifrado: bool = False
     # Orden de preferencia de los bordes para el selector. El primero es el
@@ -44,12 +48,14 @@ class Config:
     # en docs/decisiones.md.
     bordes: List[str] = field(default_factory=lambda: ["borde-1", "borde-2"])
 
-    # La política de selección, en una frase (README §2 y guía, parte 6):
-    #   el borde preferido que responda;
+    # La política de selección, en una frase (README §2 y guía, parte 6;
+    # decisión del 2026-11-19 en docs/decisiones.md):
+    #   el cliente prueba los bordes en el orden de `bordes`, dejando al
+    #   final durante evitar_borde_segundos a los que no respondieron;
     #   el borde decide: copia fresca -> hit; si no, el origen -> miss;
     #   si el origen no responde, copia obsoleta dentro de STALE_LIMIT;
-    #   si ese borde no puede entregar, el siguiente borde;
-    #   si ninguno cumple, rechazar.
+    #   si ese borde no responde (timeout, nodo_caido) o rechaza, el siguiente;
+    #   si ninguno entrega, rechazar.
 
     @classmethod
     def desde_entorno(cls) -> "Config":
@@ -59,4 +65,6 @@ class Config:
         c.stale_limit_segundos = float(os.environ.get("P20_STALE_LIMIT", c.stale_limit_segundos))
         c.capacidad = int(os.environ.get("P20_CAPACIDAD", c.capacidad))
         c.timeout_segundos = float(os.environ.get("P20_TIMEOUT", c.timeout_segundos))
+        c.evitar_borde_segundos = float(
+            os.environ.get("P20_EVITAR_BORDE", c.evitar_borde_segundos))
         return c

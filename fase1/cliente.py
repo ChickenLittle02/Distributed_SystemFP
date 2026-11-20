@@ -1,11 +1,11 @@
-"""Actor cliente: quien quiere el archivo (esqueleto, F1-S03).
+"""Actor cliente: quien quiere el archivo (F1-S03, F1-S07).
 
 Responsabilidad: crear el pedido_id, pedir el recurso por su nombre al
-borde preferido y anotar solicitud y respuesta.
-Todavía no hay selección de fuente: si el borde no responde o rechaza, no
-prueba otro (F1-S07).
-No guarda caché, no numera versiones y no aplica STALE_LIMIT. No habla con
-el origen.
+borde que diga el selector, pasar al siguiente borde si ese no responde
+(timeout o nodo_caido) o rechaza, y anotar solicitud y respuesta.
+No guarda caché, no numera versiones y no aplica STALE_LIMIT. No elige el
+borde a mano: lo hace el selector (fase1/selector.py). No habla con el
+origen.
 """
 
 from __future__ import annotations
@@ -14,9 +14,11 @@ import uuid
 from typing import Any, Dict, Optional
 
 import ray
+from ray.exceptions import RayActorError, RayError
 
 from fase1.config import Config
 from fase1.registro import registrar
+from fase1.selector import Selector
 
 
 @ray.remote
@@ -24,36 +26,75 @@ class Cliente:
     """Cliente del sistema, en su propio proceso.
 
     Entra (al crearlo): nombre ("cliente"), dict nombre_de_borde -> handle
-    del actor borde, y la Config (de ahí sale el orden de preferencia).
+    del actor borde, y la Config (orden de preferencia, timeout, cuánto se
+    evita un borde que no respondió).
     Sale: listo() y pedir(recurso).
-    Si el otro nodo no contesta: por ahora espera; el paso a otro borde es F1-S07.
+    Si el otro nodo no contesta: si un borde no responde en
+    timeout_segundos o su actor murió, lo anota y prueba el siguiente del
+    selector. Si ninguno entrega, el resultado es rechaza.
     """
 
     def __init__(self, nombre: str, bordes: Dict[str, Any], config: Config) -> None:
         self.nombre = nombre
         self.bordes = bordes
         self.cfg = config
-        self.preferidos = [b for b in config.bordes if b in bordes]
+        self.selector = Selector([b for b in config.bordes if b in bordes],
+                                 config.evitar_borde_segundos)
 
     def listo(self) -> str:
         """Confirma que el cliente vive. Entra: nada. Sale: el nombre."""
-        registrar(self.nombre, "arranque", "listo", bordes=",".join(self.preferidos))
+        registrar(self.nombre, "arranque", "listo", bordes=",".join(self.selector.bordes),
+                  timeout=self.cfg.timeout_segundos)
         return self.nombre
 
     def pedir(self, recurso: str, pedido_id: Optional[str] = None) -> Dict[str, Any]:
-        """Pide un recurso al borde preferido y devuelve la respuesta.
+        """Pide un recurso y devuelve la respuesta final.
 
         Entra: nombre del recurso; pedido_id opcional (si no viene, el
-        cliente lo crea).
-        Sale: dict con resultado, version, contenido, fuente y pedido_id.
-        Si el otro nodo no contesta: espera (hasta F1-S07).
+        cliente lo crea; darlo sirve para repetir un pedido en las pruebas).
+        Sale: dict con resultado, version, contenido, fuente (el borde que
+        entregó, o None si rechaza) y pedido_id.
+        Si el otro nodo no contesta: pasa al siguiente borde del selector;
+        si ninguno entrega, el resultado es rechaza.
         """
         pedido_id = pedido_id or uuid.uuid4().hex[:6]
-        borde = self.preferidos[0]
-        registrar(self.nombre, pedido_id, "solicitud", recurso=recurso, fuente=borde)
-        r = ray.get(self.bordes[borde].pedir.remote(pedido_id, recurso))
-        registrar(self.nombre, pedido_id, "respuesta", version=r.get("version"),
-                  resultado=r["resultado"], fuente=borde)
-        r["fuente"] = borde
-        r["pedido_id"] = pedido_id
-        return r
+        for borde in self.selector.orden():
+            registrar(self.nombre, pedido_id, "solicitud", recurso=recurso, fuente=borde)
+            r = self._llamar_borde(pedido_id, borde, recurso)
+            if r is None:
+                self.selector.no_respondio(borde)
+                continue
+            self.selector.respondio(borde)
+            if r["resultado"] == "rechaza":
+                # Ese borde agotó sus fuentes; el contrato dice probar el otro.
+                continue
+            registrar(self.nombre, pedido_id, "respuesta", version=r.get("version"),
+                      resultado=r["resultado"], fuente=borde)
+            r["fuente"] = borde
+            r["pedido_id"] = pedido_id
+            return r
+        registrar(self.nombre, pedido_id, "respuesta", resultado="rechaza", fuente="ninguna")
+        return {"resultado": "rechaza", "version": None, "contenido": None,
+                "fuente": None, "pedido_id": pedido_id}
+
+    def _llamar_borde(self, pedido_id: str, borde: str, recurso: str) -> Optional[Dict[str, Any]]:
+        """Llama al borde con tiempo de espera. None significa «no responde».
+
+        «No responde» es: la llamada no vuelve en timeout_segundos (línea
+        timeout) o el actor del borde murió (línea nodo_caido).
+        """
+        try:
+            ref = self.bordes[borde].pedir.remote(pedido_id, recurso)
+            listos, _ = ray.wait([ref], timeout=self.cfg.timeout_segundos)
+            if not listos:
+                registrar(self.nombre, pedido_id, "timeout", destino=borde,
+                          segundos=self.cfg.timeout_segundos)
+                return None
+            return ray.get(listos[0])
+        except RayActorError:
+            registrar(self.nombre, pedido_id, "nodo_caido", destino=borde)
+            return None
+        except RayError as e:
+            registrar(self.nombre, pedido_id, "nodo_caido", destino=borde,
+                      causa=type(e).__name__)
+            return None
