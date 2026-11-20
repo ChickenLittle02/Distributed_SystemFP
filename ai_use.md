@@ -14,10 +14,12 @@ ai_use:
   activities:
     - discusión de arquitectura y de las decisiones de diseño (TTL, LRU, selección, STALE_LIMIT)
     - implementación del borde, el selector, el cliente, los escenarios y el checklist de la fase 1
+    - fase 2: módulo Go de Samy (config, registro, protocolo, transporte, origen HTTP, cliente, publicador) y sus pruebas
     - redacción y revisión de la documentación (contrato, decisiones, código, diagrama, experimento, mapa de Ray)
     - depuración con los historiales de logs/
   verification:
     - corrida repetible del checklist (python3 -m fase1.checklist): los diez comportamientos comprobados en logs/
+    - fase 2: go test ./... (origen: revalidación 304, publicación e invalidación, aviso perdido, borde que no está, versión persistida; cliente: borde caído, rechaza no final) y una corrida con procesos reales (origen + publicar + curl + cliente)
     - escenarios de fallo (borde muerto, origen muerto, partición, aviso perdido) con la evidencia en logs/
     - revisión cruzada entre los dos integrantes de cada tarea y cada decisión (schedule.md, docs/decisiones.md)
     - lectura manual de los historiales filtrados por pedido_id

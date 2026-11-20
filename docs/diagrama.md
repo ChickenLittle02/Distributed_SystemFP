@@ -71,3 +71,37 @@ actores y lanza el pedido. Ese script no es un nodo del sistema.
 La partición borde→origen es `particion(True)` en el borde (F1-S09): el camino cliente→borde sigue abierto y el borde trata al origen como «no responde» (`timeout causa=particion`). La ficha está en `docs/experimento-fase1.md`; el mapa de lo que pone Ray, en `docs/mapa-ray.md`.
 
 Un borde puede no aplicar la invalidación (`perder_avisos` en `fase1/borde.py`, F1-R07). La llamada de Ray llega, la copia vieja se queda y el borde anota `invalidacion_perdida`. El origen no lo incluye en `bordes=`.
+
+---
+
+# Diagrama de la fase 2 (diseño nativo, F2-S10, borrador)
+
+Los mismos cuatro nodos, cada uno un programa de `fase2/` arrancado a mano (o con `docker run`), que
+se hablan por HTTP en claro. Sin Ray: lo que Ray ponía está ahora en `config`, `transporte` y
+`registro`. El borde (`fase2/borde`) lo escribe Rubén contra este dibujo.
+
+```text
+   publicador (cmd/publicar, curl)          lector (navegador, cmd/cliente)
+          │ PUT /r  DELETE /r                      │ GET /r   [X-Pedido-Id]
+          ▼                                        ▼  (selector: borde-1, luego borde-2)
+   ┌──────────────────┐   POST /_invalidar/r   ┌──────────────┐    ┌──────────────┐
+   │      ORIGEN      │ ─────────────────────▶ │   BORDE-1    │    │   BORDE-2    │
+   │ cmd/origen :8000 │ ◀───────────────────── │ cmd/borde    │    │ cmd/borde    │
+   │ contenido/       │   GET /r [X-Version-   │ :8001        │    │ :8002        │
+   │ .versiones.json  │        Local] → 200/304│ copias en    │    │ copias en    │
+   └──────────────────┘                        │ memoria      │    │ memoria      │
+                                               └──────────────┘    └──────────────┘
+   fase2/config.json → direcciones y números (todos lo leen)
+   fase2/registro    → logs/<nodo>.log (todos escriben)
+   fase2/transporte  → el único que abre conexiones (origen, cliente, publicador; el borde de Rubén)
+```
+
+| Componente | Lo que es del proyecto | Lo que ponía Ray y ahora es nuestro |
+| --- | --- | --- |
+| Origen | versiones por hash **persistidas**, `responder` con `304`, `PUT`/`DELETE`, `invalidar` con plazo | el proceso (`cmd/origen` + `net/http`), la lista de bordes (`config.json`), el cerrojo sobre las versiones |
+| Borde (Rubén) | TTL, LRU, marca `invalidada`, `STALE_LIMIT`, `GET /r` al lector, `GET` con `X-Version-Local` al origen, `POST /_invalidar` | el proceso, la dirección del origen (`config.json`), el plazo (`transporte`) |
+| Selector + cliente | orden fijo, el que no respondió al final, `solicitud`/`respuesta` | la lista de bordes (`config.json`), `ray.wait` → `transporte` con `context.WithTimeout`, `RayActorError` → error de conexión |
+| Publicador | `PUT`/`DELETE` solo al origen | nuevo: en la fase 1 se editaba `contenido/` a mano |
+| Registro | mismo formato | el reenvío de consola de los workers: ahora cada programa tiene la suya |
+
+Lo que no cubre este borrador: el borde (F2-R03–R07), Docker (F2-R15) y el DNS mínimo (F2-S19/S20, si entra).

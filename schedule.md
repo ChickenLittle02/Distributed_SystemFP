@@ -150,7 +150,7 @@ La fase queda lista cuando F1-R01–R11, F1-S01–S12, F1-J01–J08 y los diez c
 
 Lista interna: **25 de diciembre**. Congelado de funcionalidad: **23 de diciembre**. El 24 y el 25 cierran la lista. Ray deja de ser dependencia de ejecución en este cierre.
 
-El calendario asume **Go**. La elección, o la alternativa, se escribe en F2-R01. Si es otro lenguaje, la decisión dice por qué no esconde transporte, fallo, invalidación y obsoleto.
+El calendario asume **Go**. La elección, o la alternativa, se escribe en F2-R01. El código de Samy del 20 nov está en Go (`fase2/`, Go 1.21+), de acuerdo con ese supuesto. Si es otro lenguaje, la decisión dice por qué no esconde transporte, fallo, invalidación y obsoleto.
 
 El mismo contrato de `docs/contrato.md`, en procesos separados, sin memoria compartida. Los dos canales siguen en claro.
 
@@ -182,22 +182,22 @@ Cuando cada nodo ya escucha en su dirección (después de F2-J02), el cliente de
 
 ### Samy
 
-- [ ] **F2-S01** `registrar` en el lenguaje nativo, mismo formato del README (`logs/*.log` y la misma línea en consola). Rubén revisa. (plan 2–4 dic)
-- [ ] **F2-S02** HTTP en los dos canales, biblioteca del lenguaje. Lector→borde: `GET /<recurso>`, cuerpo con el archivo y cabeceras `resultado`, versión y `pedido_id`. Borde→origen: `GET /<recurso>` para bajar, y el mismo `GET` con la versión local para revalidar (sin cuerpo si coincide). Publicación, solo en el origen: `PUT /<recurso>` crea o reemplaza, `DELETE /<recurso>` borra. El borde rechaza `PUT` y `DELETE`. Rubén revisa. (plan 2–4 dic)
-- [ ] **F2-S03** Borrador de la tabla nativa en `docs/decisiones.md`, a partir de `docs/mapa-ray.md`. Rubén completa sus filas. (plan 2–4 dic)
-- [ ] **F2-S04** Origen nativo en HTTP. `GET /<recurso>` entrega el archivo o dice que no existe; con la versión local, confirma la misma versión sin cuerpo. `PUT /<recurso>` crea o reemplaza y sube la versión. `DELETE /<recurso>` borra. Esas dos no las atiende el borde. Rubén revisa. (plan 5–9 dic)
-- [ ] **F2-S05** Prueba manual con el navegador contra un borde fijo: abrir `http://<direccion>/<recurso>` muestra el archivo, y el historial del borde anota el pedido. Un cliente automático repite el mismo `GET` para las pruebas. Rubén revisa. (plan 5–9 dic)
-- [ ] **F2-S06** Tras un `PUT` o un `DELETE`, la invalidación sale del origen hacia los bordes. No pasa por el navegador del lector. Rubén la aplica en el borde. (plan 10–12 dic)
-- [ ] **F2-S07** Revalidación por HTTP: el borde hace `GET` al origen con la versión local. Misma versión, sin cuerpo. Versión nueva, el archivo. Rubén revisa. (plan 10–12 dic)
-- [ ] **F2-S08** Selector de fuente y cliente: borde caído, otro borde, origen. Anota `solicitud` y `respuesta`. Rubén revisa. (plan 13–16 dic)
-- [ ] **F2-S09** Pruebas del origen: respuesta, invalidación perdida, borde que no está. Corren solas. Rubén revisa. (plan 17–19 dic)
-- [ ] **F2-S10** `docs/diagrama.md` actualizado al diseño nativo. Rubén revisa. (plan 20–22 dic)
-- [ ] **F2-S11** Sus filas de `docs/decisiones.md`. Rubén revisa. (plan 20–22 dic)
-- [ ] **F2-S12** En `docs/diseno-nativo.md`, redacta y Rubén revisa el 22: protocolo, quién habla con quién y qué campos viajan.
-- [ ] **F2-S13** En `docs/diseno-nativo.md`, redacta y Rubén revisa: identidad de recurso y `pedido_id`, arranque estático y lista de miembros.
-- [ ] **F2-S14** En `docs/diseno-nativo.md`, redacta y Rubén revisa: qué se puede reintentar y cómo se reconoce un duplicado.
-- [ ] **F2-S15** En `docs/diseno-nativo.md`, redacta y Rubén revisa: invalidación perdida, borde que vuelve, y modelo de confianza con el canal en claro.
-- [ ] **F2-S16** Disclosure de uso de IA, en el formato de la metodología, si se usó un asistente. Rubén revisa que lo que él usó también esté declarado. (plan 20–22 dic)
+- [~] **F2-S01** `registrar` en el lenguaje nativo, mismo formato del README (`logs/*.log` y la misma línea en consola). Rubén revisa. (plan 2–4 dic) Hecho el 20 nov: `fase2/registro` (misma línea, `logs/<nodo>.log` + consola, pares en orden, cerrojo). Falta la revisión de Rubén.
+- [~] **F2-S02** HTTP en los dos canales, biblioteca del lenguaje. Lector→borde: `GET /<recurso>`, cuerpo con el archivo y cabeceras `resultado`, versión y `pedido_id`. Borde→origen: `GET /<recurso>` para bajar, y el mismo `GET` con la versión local para revalidar (sin cuerpo si coincide). Publicación, solo en el origen: `PUT /<recurso>` crea o reemplaza, `DELETE /<recurso>` borra. El borde rechaza `PUT` y `DELETE`. Rubén revisa. (plan 2–4 dic) Hecho el 20 nov: `fase2/protocolo` (cabeceras `X-Pedido-Id`, `X-Version`, `X-Version-Local`, `X-Misma`, `X-Resultado`, `X-Bordes-Avisados`; `304` misma versión; `404`/`503`/`405`; `POST /_invalidar/<recurso>` con `200`/`202`) y `fase2/transporte` (único socket, plazo, `timeout`/`nodo_caido`). Detalle en `docs/diseno-nativo.md` §1 y decisión del 20 nov. Falta la revisión de Rubén.
+- [~] **F2-S03** Borrador de la tabla nativa en `docs/decisiones.md`, a partir de `docs/mapa-ray.md`. Rubén completa sus filas. (plan 2–4 dic) Hecho el 20 nov: tabla «Fase 2 — tabla nativa» en `docs/decisiones.md`, con las filas de Samy; las del borde quedan para Rubén (F2-R08).
+- [~] **F2-S04** Origen nativo en HTTP. `GET /<recurso>` entrega el archivo o dice que no existe; con la versión local, confirma la misma versión sin cuerpo. `PUT /<recurso>` crea o reemplaza y sube la versión. `DELETE /<recurso>` borra. Esas dos no las atiende el borde. Rubén revisa. (plan 5–9 dic) Hecho el 20 nov: `fase2/origen` + `cmd/origen`. `GET` (bajada, `304` con `X-Version-Local`, `404`), `PUT`, `DELETE`, versión por hash persistida en `contenido/.versiones.json`. Probado con `go test` y con procesos reales (`curl`, `cmd/publicar`). Falta la revisión de Rubén.
+- [~] **F2-S05** Prueba manual con el navegador contra un borde fijo: abrir `http://<direccion>/<recurso>` muestra el archivo, y el historial del borde anota el pedido. Un cliente automático repite el mismo `GET` para las pruebas. Rubén revisa. (plan 5–9 dic) Parcial el 20 nov: `cmd/cliente` es el cliente automático (`GET` con `X-Pedido-Id`, imprime resultado, versión, fuente y bytes). La prueba con el navegador contra un borde fijo espera al borde de Rubén (F2-R03).
+- [~] **F2-S06** Tras un `PUT` o un `DELETE`, la invalidación sale del origen hacia los bordes. No pasa por el navegador del lector. Rubén la aplica en el borde. (plan 10–12 dic) Hecho el 20 nov del lado origen: tras `PUT`/`DELETE`, `POST /_invalidar/<recurso>` a cada borde con plazo; `200` = aplicó, `202` = no aplicó, sin respuesta = `timeout`/`nodo_caido`; línea `invalidar … bordes=`. Rubén lo aplica en el borde (F2-R05).
+- [~] **F2-S07** Revalidación por HTTP: el borde hace `GET` al origen con la versión local. Misma versión, sin cuerpo. Versión nueva, el archivo. Rubén revisa. (plan 10–12 dic) Hecho el 20 nov del lado origen: `GET` con `X-Version-Local` → `304` sin cuerpo y `X-Misma: si`, o `200` con el archivo y `X-Misma: no`. El borde que la usa es de Rubén (F2-R05).
+- [~] **F2-S08** Selector de fuente y cliente: borde caído, otro borde, origen. Anota `solicitud` y `respuesta`. Rubén revisa. (plan 13–16 dic) Hecho el 20 nov: `fase2/cliente` (selector igual que en la fase 1; `timeout`/`nodo_caido` → siguiente borde; `rechaza` → siguiente; `respuesta … fuente=ninguna` si nadie entrega). El cliente no habla con el origen. Pruebas en `cliente_test.go`. Falta la revisión de Rubén.
+- [~] **F2-S09** Pruebas del origen: respuesta, invalidación perdida, borde que no está. Corren solas. Rubén revisa. (plan 17–19 dic) Hecho el 20 nov: `fase2/origen/origen_test.go` (revalidación sin bytes, publicación e invalidación, aviso perdido con `202`, borde que no está, versión que sobrevive al reinicio, nombres peligrosos) y `cliente_test.go`. `cd fase2 && go test ./...`. Falta la revisión de Rubén.
+- [~] **F2-S10** `docs/diagrama.md` actualizado al diseño nativo. Rubén revisa. (plan 20–22 dic) Borrador del 20 nov al final de `docs/diagrama.md` (procesos, flechas HTTP, tabla «qué ponía Ray»). Se cierra cuando exista el borde.
+- [~] **F2-S11** Sus filas de `docs/decisiones.md`. Rubén revisa. (plan 20–22 dic) Cinco entradas del 20 nov en `docs/decisiones.md` (HTTP concreto y `transporte`; configuración estática; versiones persistidas; aviso con plazo sin reintento; `registrar` en Go). Falta la revisión de Rubén.
+- [~] **F2-S12** En `docs/diseno-nativo.md`, redacta y Rubén revisa el 22: protocolo, quién habla con quién y qué campos viajan. Redactado el 20 nov: `docs/diseno-nativo.md` §1. Rubén revisa.
+- [~] **F2-S13** En `docs/diseno-nativo.md`, redacta y Rubén revisa: identidad de recurso y `pedido_id`, arranque estático y lista de miembros. Redactado el 20 nov: `docs/diseno-nativo.md` §2. Rubén revisa.
+- [~] **F2-S14** En `docs/diseno-nativo.md`, redacta y Rubén revisa: qué se puede reintentar y cómo se reconoce un duplicado. Redactado el 20 nov: `docs/diseno-nativo.md` §3. Rubén revisa.
+- [~] **F2-S15** En `docs/diseno-nativo.md`, redacta y Rubén revisa: invalidación perdida, borde que vuelve, y modelo de confianza con el canal en claro. Redactado el 20 nov: `docs/diseno-nativo.md` §4. Rubén revisa.
+- [~] **F2-S16** Disclosure de uso de IA, en el formato de la metodología, si se usó un asistente. Rubén revisa que lo que él usó también esté declarado. (plan 20–22 dic) `ai_use.md` actualizado el 20 nov con la fase 2 de Samy. Falta lo de Rubén.
 - [ ] **F2-S17** Recorre el código de Rubén y señala comentarios o decisiones que faltan. (plan 23 dic)
 - [ ] **F2-S18** Puede modificar una función del borde o de `STALE_LIMIT` y explicar qué garantía toca. (cierre 25 dic)
 - [ ] **F2-S19** DNS mínimo. Responde el nombre `cdn.ejemplo.com` con una sola IP, según la red desde la que llega la pregunta: cada red es una ciudad y recibe el borde de esa red. Si ese borde no responde, la siguiente respuesta da la IP del otro. No reenvía bytes. La lista de bordes está en su configuración. Rubén revisa. (plan 20–22 dic)
@@ -205,7 +205,7 @@ Cuando cada nodo ya escucha en su dirección (después de F2-J02), el cliente de
 
 ### Los dos
 
-- [ ] **F2-J01** Un proceso le manda una línea a otro y los dos la anotan. `cifrado = false` está en la configuración. Direcciones en configuración, justificadas como arranque estático. (plan 2–4 dic)
+- [~] **F2-J01** Un proceso le manda una línea a otro y los dos la anotan. `cifrado = false` está en la configuración. Direcciones en configuración, justificadas como arranque estático. (plan 2–4 dic) Del lado de Samy, 20 nov: `cmd/publicar` → `cmd/origen` por HTTP, los dos anotan (`publica` en `publicador.log`, `publica`/`invalidar` en `origen.log`); `cifrado=false` y las direcciones están en `fase2/config.json`, justificadas en la decisión «Configuración estática». Falta la línea borde ↔ origen cuando exista el borde.
 - [ ] **F2-J02** Miss, bajada y hit, igual que en Ray, con origen, borde y cliente en procesos separados. (plan 5–9 dic)
 - [ ] **F2-J03** Sesión del 12: se congela el texto de invalidar y de revalidar. La expulsión se ve en el log. (plan 12 dic)
 - [ ] **F2-J04** Un borde apagado no impide resolver el pedido. Una invalidación perdida queda en el historial. (plan 13–16 dic)

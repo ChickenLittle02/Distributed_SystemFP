@@ -17,6 +17,21 @@ Cada nodo deja su historial en `logs/<nodo>.log` con el formato de [Registro de 
 `grep "pedido=<id>" logs/*.log` reconstruye un pedido. Los valores provisionales (TTL 30 s, `STALE_LIMIT` 60 s) se
 acortan con `P20_TTL=3 P20_STALE_LIMIT=4` para no esperar.
 
+## Cómo correr la fase 2 (diseño nativo, Go)
+
+Go 1.21 o superior. Desde la raíz del repositorio, cada nodo es un proceso:
+
+```text
+go run ./fase2/cmd/origen -config fase2/config.json                     # escucha en 127.0.0.1:8000
+go run ./fase2/cmd/publicar -config fase2/config.json put apunte.txt ./archivo-local
+go run ./fase2/cmd/cliente -config fase2/config.json -recurso apunte.txt   # pide a los bordes de la configuración
+curl -i -H 'X-Version-Local: 1' http://127.0.0.1:8000/apunte.txt        # revalidar: 304 sin cuerpo
+cd fase2 && go test ./...                                                # pruebas del origen y del cliente
+```
+
+El borde nativo (`fase2/cmd/borde`) lo escribe Rubén. El protocolo HTTP, las direcciones estáticas y las
+respuestas de diseño están en [docs/diseno-nativo.md](docs/diseno-nativo.md).
+
 Dónde está cada cosa: el tablero de tareas es [schedule.md](schedule.md); lo visible desde fuera,
 [docs/contrato.md](docs/contrato.md); los procesos y qué pone Ray, [docs/diagrama.md](docs/diagrama.md) y
 [docs/mapa-ray.md](docs/mapa-ray.md); el experimento de partición, [docs/experimento-fase1.md](docs/experimento-fase1.md);

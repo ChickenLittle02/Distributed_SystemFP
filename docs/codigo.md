@@ -400,3 +400,121 @@ El segundo pedido deja solo dos líneas en el borde y el cliente; el origen no i
 - Qué hace: anota una línea `checklist pedido=arranque config cifrado=false ttl=… stale_limit=…` (`logs/checklist.log`), guarda el tamaño de cada log al empezar, corre los pasos, y después imprime una tabla `[x]`/`[ ]` por comportamiento con las líneas que lo prueban (o `FALTA nodo: /patrón/`). Para «`registrar` desde la primera operación» exige que la primera línea nueva de cada nodo sea `listo`. Al final imprime el recorrido de un pedido filtrado por `pedido_id` en los cuatro logs (F1-J02). Termina con código 1 si falta algo.
 - Qué no hace: no borra `logs/` ni decide nada del sistema; no prueba `timeout` real ni `origen_caido` (ese escenario existe aparte). No sustituye mirarlo juntos: es lo que se corre en esa sesión.
 - Tareas: F1-J06 (y evidencia para F1-J02, F1-J03, F1-J05). Implementa: Samy. Revisa: Rubén (pendiente).
+
+---
+
+# Fase 2 — código nativo (Go)
+
+Módulo `fase2/` (`go.mod`: `github.com/ChickenLittle02/Distributed_SystemFP/fase2`, Go 1.21+). Se corre desde la raíz del repositorio. Pruebas: `cd fase2 && go test ./...`.
+
+```text
+fase2/
+  go.mod
+  config.json             Direcciones y números de la corrida (arranque estático)
+  config/config.go        Lee config.json y P20_*
+  registro/registro.go    registrar en Go: misma línea, un archivo por nodo
+  protocolo/protocolo.go  Cabeceras, resultados y rutas HTTP del proyecto
+  transporte/transporte.go  Único sitio que abre conexiones: Enviar con plazo; timeout / nodo_caido
+  origen/origen.go        Origen HTTP: GET (+ revalidación 304), PUT, DELETE, versiones persistidas, invalidar
+  origen/origen_test.go   Pruebas del origen (F2-S09)
+  cliente/selector.go     Selector: orden fijo, el que no respondió va al final
+  cliente/cliente.go      Cliente: GET al borde que diga el selector; solicitud / respuesta
+  cliente/cliente_test.go Pruebas del cliente y del selector
+  cmd/origen/main.go      Programa origen
+  cmd/cliente/main.go     Programa cliente (el «cliente automático» de F2-S05)
+  cmd/publicar/main.go    Programa de publicación: put / delete contra el origen
+  borde/, cmd/borde/      (Rubén, F2-R03–R07)
+```
+
+## fase2/config
+
+- Qué es: la configuración de la corrida nativa. `Config` con `Origen`, `Bordes` (nombre + dirección, en orden de preferencia), `TTLSegundos`, `StaleLimitSegundos`, `Capacidad`, `Expulsion`, `TimeoutSegundos`, `EvitarBordeSegundos`, `Cifrado`, `Contenido`, `Logs`.
+- Qué hace: `Cargar(ruta)` lee el JSON, aplica `P20_TTL`, `P20_STALE_LIMIT`, `P20_CAPACIDAD`, `P20_TIMEOUT`, `P20_EVITAR_BORDE`, y valida. `Timeout()`, `Esquema()` (`http`; `https` si `cifrado`), `DireccionDe(nombre)`.
+- Qué no hace: no decide nada; no descubre nodos. Tareas: F2-J01 (direcciones en configuración). Implementa: Samy. Revisa: Rubén (pendiente).
+
+## fase2/registro
+
+- Qué es: `Registrar(nodo, pedidoID, operacion string, datos ...Dato) string`, con `D(clave, valor)` para los pares, en orden. Escribe en consola (`registro.Consola`, las pruebas la apagan) y en `<logs>/<nodo>.log` (`Configurar(carpeta)`), bajo cerrojo.
+- Qué no hace: no decide nada, no abre sockets, no guarda bytes de archivos. Tarea: F2-S01. Implementa: Samy. Revisa: Rubén (pendiente).
+
+## fase2/protocolo
+
+- Qué es: las constantes del formato de mensaje (F2-S02): cabeceras `X-Pedido-Id`, `X-Version`, `X-Version-Local`, `X-Misma`, `X-Resultado`, `X-Fuente`, `X-Bordes-Avisados`, `X-Nodo`; tokens `hit`, `miss`, `sirve_obsoleta`, `rechaza`, `file_doesnt_exist`; `RutaInvalidar = /_invalidar/`. El comentario de cabecera del paquete es el resumen del protocolo; el detalle está en `docs/diseno-nativo.md` §1.
+- Tarea: F2-S02. Implementa: Samy. Revisa: Rubén (pendiente).
+
+## fase2/transporte
+
+- Qué es: `Transporte` con `Nuevo(plazo, cifrado)` y `Enviar(destino, método, ruta, cabeceras, cuerpo) (*Respuesta, Fallo, error)`. `Respuesta` trae estado, cabeceras y cuerpo. `Fallo` es `SinFallo`, `Timeout` (`context.DeadlineExceeded`) o `NodoCaido` (cualquier otro error de red); `Fallo.String()` da el token del historial.
+- Qué no hace: no reintenta; no interpreta códigos; con `cifrado=true` solo cambiaría el esquema (TLS no entra en esta fase). Es el sitio de F2-R02 (`enviar`/`recibir`), sobre HTTP.
+- Implementa: Samy. Revisa: Rubén (pendiente).
+
+### Función `Enviar`
+
+| | |
+| --- | --- |
+| Entra | `destino` (host:puerto), método, ruta, cabeceras (las vacías no se mandan), cuerpo (nil si no hay) |
+| Sale | `Respuesta`, o `Fallo` ≠ `SinFallo` y el error |
+| Si el otro nodo no contesta | `Timeout` si venció el plazo; `NodoCaido` si la conexión no abrió o se cortó. No reintenta |
+
+## fase2/origen
+
+- Qué es: el origen nativo, dueño de la versión de referencia.
+- Qué hace: `Nuevo(cfg)` crea la carpeta de contenido si falta y lee `contenido/.versiones.json`. `Responder(pedidoID, recurso, versionLocal *int)`: lee el archivo, calcula la versión por hash (sube si cambió, persiste), y devuelve `Existe=false`, o `Misma=true` sin bytes si la versión local coincide, o los bytes; anota `responde … version=N [misma=si|no]` o `responde … resultado=file_doesnt_exist`. `Publicar` escribe el archivo, anota `publica … version=N bytes=…` y llama a `Invalidar`. `Borrar` quita el archivo (conserva la entrada de versión), anota `borra … existia=si|no` y llama a `Invalidar`. `Invalidar` manda `POST /_invalidar/<recurso>` a cada borde con el plazo del transporte, anota `timeout`/`nodo_caido destino=<borde>` por los que no contestan y `invalidar … version=N|resultado=file_doesnt_exist bordes=<lista>|ninguno`. `Manejador()` es el `http.Handler`: `GET` → `200`/`304`/`404`, `PUT` → `200` con `X-Version` y `X-Bordes-Avisados`, `DELETE` → `200`/`404`, otros → `405`; nombres con `/`, `..` o que empiezan por `.` → `400`.
+- Qué no hace: no es el borde; no toca copias; no abre el puerto (eso es `cmd/origen`). No reintenta avisos. No hay autenticación.
+- Tareas: F2-S04, F2-S06, F2-S07. Implementa: Samy. Revisa: Rubén (pendiente).
+
+### Método `Responder`
+
+| | |
+| --- | --- |
+| Entra | `pedidoID`, `recurso`, `versionLocal` (nil = bajada normal) |
+| Sale | `Respuesta{Existe, Misma, Version, Contenido}` |
+| Si el otro nodo no contesta | No aplica: solo lee disco local |
+
+Historial de una revalidación sin bytes y de una publicación con los dos bordes apagados (corrida del 20 nov):
+
+```text
+01:54:35.170 origen pedido=e2e-2 responde recurso=apunte.txt version=1 misma=si
+01:54:35.560 origen pedido=5a76e7 publica recurso=e2e.txt version=1 bytes=18
+01:54:35.560 origen pedido=5a76e7 nodo_caido destino=borde-1 segundos=2
+01:54:35.560 origen pedido=5a76e7 nodo_caido destino=borde-2 segundos=2
+01:54:35.561 origen pedido=5a76e7 invalidar recurso=e2e.txt version=1 bordes=ninguno
+```
+
+### Método `Invalidar`
+
+| | |
+| --- | --- |
+| Entra | `pedidoID` (el del `PUT`/`DELETE`) y `recurso` |
+| Sale | `Aviso{Recurso, Version, Existe, Avisados}` |
+| Si el otro nodo no contesta | `timeout` o `nodo_caido destino=<borde>`; ese borde no entra en `bordes=`; se sigue con el siguiente |
+
+### Pruebas (`origen_test.go`, F2-S09)
+
+`TestResponderYRevalidarSinBytes` (200 → 304 → 200 con versión nueva → 404), `TestPublicarInvalidaALosBordes` (PUT igual no sube, PUT distinto sube, aviso con versión, DELETE con `file_doesnt_exist`, tras borrar y volver la versión sigue), `TestAvisoPerdidoYBordeQueNoEsta` (un borde contesta 202, otro no existe: `bordes=borde-1`, `nodo_caido destino=borde-3`, sin bloquear), `TestVersionSobreviveAlReinicio`, `TestNombresPeligrosos`.
+
+## fase2/cliente
+
+- Qué es: el selector (`selector.go`) y el cliente (`cliente.go`).
+- Qué hace: `NuevoSelector(bordes, evitar)` con `Orden()`, `NoRespondio(nombre)`, `Respondio(nombre)`: la misma política de la fase 1. `Nuevo(nombre, cfg)` crea el cliente; `Pedir(recurso, pedidoID)` recorre `Orden()`, anota `solicitud … fuente=<borde>`, manda `GET /<recurso>` con `X-Pedido-Id`, anota `timeout`/`nodo_caido destino=<borde>` y pasa al siguiente; si el borde responde `rechaza`, también pasa al siguiente; la primera respuesta que entrega (o `file_doesnt_exist`) es la final: `respuesta [version=N] resultado=… fuente=<borde>`. Si ninguno entrega, `respuesta resultado=rechaza fuente=ninguna`. `NuevoPedidoID()` da 6 hex.
+- Qué no hace: no guarda caché, no habla con el origen, no numera versiones.
+- Tareas: F2-S05 (cliente automático), F2-S08. Implementa: Samy. Revisa: Rubén (pendiente).
+
+### Método `Pedir`
+
+| | |
+| --- | --- |
+| Entra | `recurso`, `pedidoID` ("" para crearlo) |
+| Sale | `Respuesta{PedidoID, Resultado, Version, Contenido, Fuente}` |
+| Si el otro nodo no contesta | `timeout` o `nodo_caido` y siguiente borde; `rechaza` si ninguno entrega |
+
+### Pruebas (`cliente_test.go`)
+
+`TestBordeCaidoYElOtroEntrega` (nodo_caido en borde-1, miss por borde-2; el segundo pedido no vuelve a probar borde-1), `TestRechazaDeUnBordeNoEsFinal` (503 en borde-1, `sirve_obsoleta` por borde-2), `TestTodosRechazanOCaen` (`rechaza fuente=ninguna`), `TestFileDoesntExistSinCuerpo`, `TestSelectorOrden`.
+
+## fase2/cmd/origen, cmd/cliente, cmd/publicar
+
+- `cmd/origen -config fase2/config.json [-escucha host:puerto]`: anota `listo direccion=… bordes=… timeout=… cifrado=false` y sirve.
+- `cmd/cliente -config … -recurso apunte.txt [-n 2] [-pedido id] [-nombre cliente] [-guardar archivo]`: uno o varios pedidos; imprime `pedido=… resultado=… version=… fuente=… bytes=…`; sale con 1 si hubo `rechaza` o `file_doesnt_exist`.
+- `cmd/publicar -config … put <recurso> <archivo-local>` | `delete <recurso>`: anota `publica`/`borra` y `respuesta estado=… version=… bordes=…` en `logs/publicador.log`; imprime la versión y los bordes avisados.
+- Implementa: Samy. Revisa: Rubén (pendiente).

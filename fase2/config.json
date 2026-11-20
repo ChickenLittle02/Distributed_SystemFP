@@ -1,0 +1,16 @@
+{
+  "origen": "127.0.0.1:8000",
+  "bordes": [
+    {"nombre": "borde-1", "direccion": "127.0.0.1:8001"},
+    {"nombre": "borde-2", "direccion": "127.0.0.1:8002"}
+  ],
+  "ttl_segundos": 30,
+  "stale_limit_segundos": 60,
+  "capacidad": 2,
+  "expulsion": "LRU",
+  "timeout_segundos": 2,
+  "evitar_borde_segundos": 10,
+  "cifrado": false,
+  "contenido": "contenido",
+  "logs": "logs"
+}

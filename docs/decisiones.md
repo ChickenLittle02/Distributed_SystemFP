@@ -265,3 +265,75 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Dónde está en el código: todavía no. Queda en el schedule: F2-S02, F2-S04, F2-S06, F2-S07, F2-R03 y F2-J10.
 - Implementa: Samy (HTTP del origen, `PUT` y `DELETE`) y Rubén (el `GET` del borde hacia el lector y hacia el origen)
 - Revisa: los dos, cuando el código exista
+
+## Fase 2 — tabla nativa (F2-S03, borrador de Samy; Rubén completa sus filas)
+
+Por cada mecanismo: qué hacía Ray en la fase 1, qué opciones nativas había, cuál se eligió y qué se pierde. Las filas del borde (TTL, LRU, invalidación en el borde, `STALE_LIMIT`) las completa Rubén en F2-R08.
+
+| Mecanismo | Qué hacía Ray (fase 1) | Opciones nativas | Elegida | Qué se pierde | Dónde |
+| --- | --- | --- | --- | --- | --- |
+| Ejecución de cada nodo | `@ray.remote` + `Clase.remote()`: un worker por actor, arrancado y supervisado por Ray | un binario por rol arrancado a mano; `docker run` por nodo (F2-R15); un supervisor | un programa por rol (`cmd/origen`, `cmd/cliente`, `cmd/publicar`; `cmd/borde` de Rubén), arrancado a mano o con `docker run` | nadie reinicia un nodo que muere; nadie sabe que murió hasta que se le llama | `fase2/cmd/*` |
+| Transporte | `metodo.remote(...)` + `ray.get`: serialización y entrega entre procesos | TCP propio con *framing* de texto (`enviar`/`recibir` del README); HTTP de `net/http`; gRPC | **HTTP/1.1 de la biblioteca estándar**: recurso en la ruta, versión y `pedido_id` en cabeceras, archivo en el cuerpo; un solo paquete (`transporte`) abre conexiones | hay que fijar a mano estados, cabeceras y qué significa cada código; HTTP mete cabeceras que no son nuestras | `fase2/transporte`, `fase2/protocolo` |
+| Serialización | dict + bytes viajaban solos | JSON; texto plano; cuerpo binario + cabeceras | cuerpo binario = archivo; metadatos en cabeceras de texto | nada: es más simple que Ray | `fase2/protocolo` |
+| Quién sabe dónde está quién | el *handle* del actor | descubrimiento (multicast, registro central); lista estática; DNS | **lista estática en `fase2/config.json`** (origen + bordes con nombre y dirección), leída por todos | añadir un borde es editar el archivo y reiniciar; un borde fuera de la lista no existe para nadie | `fase2/config` |
+| Esperar con límite | `ray.wait(timeout)` | `context.WithTimeout`; `http.Client.Timeout`; `SetDeadline` en el socket | `context.WithTimeout` por llamada, con `timeout_segundos` de la configuración, en el `transporte` | nada; el plazo es explícito | `fase2/transporte` |
+| Detectar nodo caído | `RayActorError` sin esperar al plazo | error de `connect` (conexión rechazada) vs plazo vencido; *health checks* | el `transporte` clasifica: `context.DeadlineExceeded` → `timeout`; cualquier otro error de red → `nodo_caido`. Sin *health checks*: se decide en cada llamada | un proceso colgado se ve como `timeout`, no como caído; no hay noticia hasta que alguien llama | `fase2/transporte` |
+| Un mensaje a la vez por actor | el actor serializaba las llamadas; sin cerrojos | un hilo por nodo; cerrojo sobre el estado; canal | el servidor HTTP de Go atiende cada pedido en su gorrutina; el estado del origen (`versiones`) va bajo `sync.Mutex`; el borde decide lo suyo (Rubén) | hay que acordarse del cerrojo en cada estado compartido | `fase2/origen` |
+| Versión de referencia | `_versiones` en memoria del actor: reinicio → versión 1 | archivo JSON; SQLite; nombre de archivo con versión | **`contenido/.versiones.json`** (versión + hash por recurso), escrito en cada cambio; hash SHA-256 sigue siendo la única señal | un `PUT` concurrente con el mismo recurso serializa en el cerrojo; el archivo se reescribe entero | `fase2/origen` (`versionDe`, `persistir`) |
+| Publicar | editar `contenido/` a mano y llamar `invalidar` | lo mismo; `PUT`/`DELETE` HTTP en el origen; un panel | **`PUT /<recurso>` y `DELETE /<recurso>` solo en el origen**; el borde responde `405` | no hay cuentas: publica quien alcance el origen | `fase2/origen`, `fase2/cmd/publicar` |
+| Invalidación origen → bordes | `borde.invalidar.remote` con `ray.get` sin timeout; `anotar_bordes` | `POST` a cada borde con timeout; cola/*pub-sub*; que el borde pregunte | **`POST /_invalidar/<recurso>`** a cada borde de la lista, con el plazo del transporte; `200` = aplicó, `202` = no aplicó, otra cosa = no contestó | un borde colgado cuesta un plazo entero por aviso; sin reintento: converge por TTL | `fase2/origen` (`Invalidar`) |
+| Revalidación | `responder(…, version_local)` → `misma` | `If-None-Match`/`304`; endpoint aparte | **`X-Version-Local` → `304` sin cuerpo, `X-Misma: si`** | nada | `fase2/origen` |
+| Selección de fuente | igual que ahora (no era de Ray) | lo mismo; DNS por red (F2-S19) | el mismo selector (orden fijo, el que no respondió va al final) en el proceso del cliente | nada | `fase2/cliente/selector.go` |
+| Historial | `registrar` en Python; Ray reenviaba el stdout de los workers | lo mismo en Go | `fase2/registro.Registrar`, mismo formato, un archivo por nodo y consola | cada programa tiene su propia consola: para verlo todo junto se mira `logs/` | `fase2/registro` |
+| Caché del borde: TTL, LRU, estados, `STALE_LIMIT` | no era de Ray | lo mismo en Go | (Rubén, F2-R03–R06) | | `fase2/borde` |
+| Reintentos | Ray no reintentaba; nadie quería que lo hiciera | reintento en el transporte; reintento por nodo | ninguno en el transporte; el cliente cambia de borde con el mismo `pedido_id`; el resto no reintenta | ver `docs/diseno-nativo.md` §3 | |
+
+### 2026-11-20 — HTTP concreto: cabeceras, códigos y el paquete `transporte` como único socket
+
+- Decisión: el protocolo de `docs/diseno-nativo.md` §1. Recurso en la ruta, `X-Pedido-Id`, `X-Version`, `X-Version-Local`, `X-Misma`, `X-Resultado`, `X-Bordes-Avisados`, archivo en el cuerpo. `304` para «misma versión», `404` + `X-Resultado: file_doesnt_exist`, `503` + `rechaza` en el borde, `405` a `PUT`/`DELETE` en el borde, `202` del borde = aviso recibido y no aplicado. Los dos programas de Samy y el borde de Rubén hablan por `fase2/transporte.Enviar(destino, método, ruta, cabeceras, cuerpo)`, que pone el plazo con `context.WithTimeout` y clasifica el fallo en `timeout` o `nodo_caido`. Es la pieza que F2-R02 llamaba `enviar`/`recibir`, sobre HTTP en vez de TCP a mano.
+- Alternativas consideradas: TCP propio con mensajes de texto delimitados (lo que el README describe); JSON en el cuerpo con los metadatos; un endpoint aparte `/revalidar`; códigos propios en vez de los de HTTP.
+- Por qué esta: la metodología del curso permite «librerías normales para HTTP/gRPC, serialización…» y lo que exige es que el mecanismo (timeouts, reintentos, identidad de pedido, semántica de fallo) sea nuestro y explícito; Rubén eligió HTTP el 20 nov para que el lector y quien publica se prueben con un navegador. Usar los códigos de HTTP con su significado (`304`, `404`, `405`, `503`) evita inventar un segundo vocabulario, y poner los tokens del contrato en `X-Resultado` mantiene las mismas palabras en el log y en la respuesta. Un solo paquete que abre conexiones es lo que permite que TLS, si entra, no toque la lógica.
+- Qué no resuelve: HTTP no es el `enviar`/`recibir` del README ni de F2-R02; el README y esa tarea hay que alinearlos (pendiente de Rubén). No hay autenticación: lo dice `diseno-nativo.md` §4. Un `timeout` real de un borde lento sigue sin escenario (ficha F3-R03).
+- Dónde está en el código: `fase2/protocolo/protocolo.go`, `fase2/transporte/transporte.go`; lo usan `fase2/origen` (avisos), `fase2/cliente` (GET) y `fase2/cmd/publicar` (PUT/DELETE).
+- Implementa: Samy
+- Revisa: Rubén (pendiente)
+
+### 2026-11-20 — Configuración estática en `fase2/config.json`, los mismos números que la fase 1
+
+- Decisión: un archivo JSON con la dirección del origen, la lista de bordes (nombre + `host:puerto`, en orden de preferencia), TTL, `STALE_LIMIT`, capacidad, política, timeout, `evitar_borde_segundos`, `cifrado=false`, y las carpetas `contenido` y `logs`. Todos los programas lo leen con `-config`; `P20_*` sobreescribe los números como en la fase 1. No hay descubrimiento ni registro central: es el arranque estático que el tablero da por válido si se justifica.
+- Alternativas consideradas: banderas de línea de comandos por programa; variables de entorno para todo; un nodo de registro al que cada borde se anuncia; DNS.
+- Por qué esta: un archivo que los cuatro programas comparten es la forma más corta de que «la lista de miembros sea la misma en todos» sin un protocolo de membresía, que no es el aporte de este proyecto. Es lo que una CDN pequeña hace: el operador sabe sus nodos. Las direcciones por defecto (`127.0.0.1:8000/8001/8002`) sirven para la corrida local; con Docker (F2-R15) cambian a los nombres de los contenedores.
+- Qué no resuelve: añadir o quitar un borde exige editar el archivo y reiniciar a quien lo use; un borde que no está en la lista no recibe avisos. No hay valores por nodo (todos los bordes comparten TTL y capacidad).
+- Dónde está en el código: `fase2/config/config.go`, `fase2/config.json`.
+- Implementa: Samy
+- Revisa: Rubén (pendiente)
+
+### 2026-11-20 — El origen persiste versión y hash; borrar no reinicia la versión
+
+- Decisión: `contenido/.versiones.json` guarda, por recurso, la versión y el hash SHA-256 del último contenido visto. Se escribe cada vez que una versión cambia. Al arrancar, el origen lo lee: un reinicio no vuelve a la versión 1. `DELETE` borra el archivo pero conserva la entrada: si el recurso vuelve con otro contenido, la versión sigue subiendo (1 → 2 → borrado → 3). El hash sigue siendo la única señal de cambio, y se calcula también en cada `GET`, así que editar el archivo a mano sigue subiendo la versión como en la fase 1.
+- Alternativas consideradas: dejar las versiones en memoria (fase 1); versión en el nombre del archivo; SQLite; reiniciar la versión al borrar.
+- Por qué esta: la revisión de la decisión «Hash del contenido» (19 nov) dejó dicho que un origen que reinicia y vuelve a 1 confirmaría `misma=si` a una copia de otro contenido. Con la versión persistida eso no pasa. Conservar la entrada tras borrar evita que un recurso borrado y vuelto a publicar reciba un número que un borde ya tuvo. Un JSON pequeño basta: el origen es uno y las escrituras van bajo cerrojo.
+- Qué no resuelve: el archivo se reescribe entero en cada cambio; con muchos recursos habría que cambiarlo. Si alguien borra `.versiones.json` a mano, la numeración vuelve a 1. Hashear en cada `GET` cuesta con archivos grandes; el origen HTTP podría fiarse del hash guardado y rehashear solo en `PUT`, pero entonces editar a mano no subiría la versión: se prefirió conservar ese comportamiento de la fase 1.
+- Dónde está en el código: `fase2/origen/origen.go` (`versionDe`, `persistir`, `Nuevo`). Prueba `TestVersionSobreviveAlReinicio`.
+- Implementa: Samy
+- Revisa: Rubén (pendiente)
+
+### 2026-11-20 — El aviso de invalidación lleva plazo y no se reintenta
+
+- Decisión: tras un `PUT` o un `DELETE`, el origen manda `POST /_invalidar/<recurso>` a cada borde de la configuración, uno tras otro, cada uno con el plazo del transporte. El borde que contesta `200` entra en `bordes=`; el que contesta `202` (recibió y no aplicó) o cualquier otro código no entra; el que no contesta deja `timeout` o `nodo_caido destino=<borde>` en el historial del origen y tampoco entra. No hay reintento: el borde que se quedó fuera se pone al día cuando su TTL venza y revalide. La respuesta del `PUT` al publicador lleva `X-Bordes-Avisados` para que quien publica vea a quién llegó.
+- Alternativas consideradas: avisos en paralelo (una gorrutina por borde); reintentar N veces; una cola persistente de avisos pendientes; que el borde pregunte periódicamente al origen.
+- Por qué esta: en la fase 1 el aviso no tenía plazo y un borde colgado bloqueaba al origen (revisión de R06); el plazo lo arregla. Secuencial y sin reintento porque con dos bordes el coste es un plazo por borde caído y el sistema ya converge por TTL (`diseno-nativo.md` §4); una cola de reintentos sería estado durable nuevo que habría que diseñar y defender, y no es el aporte de este proyecto. El publicador ve la lista y puede repetir el `PUT` (idempotente) si quiere insistir.
+- Qué no resuelve: con muchos bordes caídos el `PUT` tarda `timeout × caídos`; un aviso perdido de verdad solo se nota por la ausencia en `bordes=`. Un borde que arranca después del aviso no lo recibe, y no le hace falta: arranca vacío.
+- Dónde está en el código: `fase2/origen/origen.go` (`Invalidar`). Pruebas `TestPublicarInvalidaALosBordes`, `TestAvisoPerdidoYBordeQueNoEsta`.
+- Implementa: Samy
+- Revisa: Rubén (pendiente)
+
+### 2026-11-20 — `registrar` en Go: misma línea, un archivo por nodo, pares en orden
+
+- Decisión: `fase2/registro.Registrar(nodo, pedidoID, operacion, datos...)` escribe «`HH:MM:SS.mmm nodo pedido=… operacion clave=valor …`» en consola y en `<logs>/<nodo>.log`, con un cerrojo para que las gorrutinas del servidor HTTP no mezclen líneas. Los pares van como una lista ordenada (`registro.D("recurso", r)`) porque en Go un mapa no conserva el orden y el historial se lee mejor con las claves siempre en el mismo sitio.
+- Alternativas consideradas: el paquete `log` de Go (mete su propio prefijo); JSON por línea; un mapa para los datos.
+- Por qué esta: el README fija el formato y la fase 1 ya lo escribe así; `grep "pedido=…" logs/*.log` tiene que funcionar igual con logs de Python y de Go mezclados. La fase 3 compara los dos sistemas leyendo los mismos historiales.
+- Qué no resuelve: cada programa escribe su consola; para ver todo junto se mira `logs/`. El navegador del lector no escribe nada: su pedido lo anota el borde.
+- Dónde está en el código: `fase2/registro/registro.go`. Lo usan todos los programas de `fase2/`.
+- Implementa: Samy
+- Revisa: Rubén (pendiente)
