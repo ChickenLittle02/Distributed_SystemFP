@@ -75,9 +75,9 @@ Corrida objetivo: un origen, dos bordes y un cliente, en varios procesos.
 - [x] **F1-R03** Esqueleto de `registrar` con el formato del README. Samy revisa. (plan 16–17 nov) Código en `fase1/registro.py`. Documentado en `docs/codigo.md`. Revisado por Samy el 19 nov: es la única función que escribe el historial, y borde, selector y cliente la usan tal cual.
 - [x] **F1-R04** Esqueleto del actor origen. Samy revisa. (plan 16–17 nov) Actor en `fase1/origen.py`. Documentado en `docs/codigo.md`. Revisado por Samy el 19 nov; dejó dos preguntas abiertas para R06 y R08 en `docs/decisiones.md`.
 - [x] **F1-R05** El origen guarda versiones, responde un recurso y anota `responde`. Samy revisa. (plan 18–20 nov) `responder` en `fase1/origen.py` lee `contenido/`, versiona por hash y anota. Documentado en `docs/codigo.md`. Revisado por Samy el 19 nov. Propuesta de Samy para R08: `responder(pedido_id, recurso, version_local=None)`.
-- [~] **F1-R06** Invalidación desde el origen, con la lista de bordes avisados. Samy la aplica en el borde. (plan 21–22 nov) `invalidar` en `fase1/origen.py` avisa a los bordes de `anotar_bordes` y anota `bordes=borde-1,borde-2`. El borde no borra la copia: la marca `invalidada` y no la devuelve. El pedido siguiente es `miss causa=invalidada` y, si el origen contesta, baja la versión nueva. Escenario `python3 -m fase1.escenarios invalidar`. Documentado en `docs/codigo.md` y `docs/decisiones.md`. Falta la revisión de Samy.
-- [~] **F1-R07** Caso en que un borde no recibe el aviso, anotado en el historial. Samy revisa. (plan 21–22 nov) `perder_avisos` en `fase1/borde.py`: el aviso llega, no se aplica, la copia vieja sigue y se anota `invalidacion_perdida`. El origen no lo incluye en `bordes=`. Escenario `python3 -m fase1.escenarios perdida`. Documentado en `docs/codigo.md` y `docs/decisiones.md`. Falta la revisión de Samy.
-- [~] **F1-R08** Revalidación del lado origen: misma versión o versión nueva. Samy revisa. (plan 23–24 nov) `responder(pedido_id, recurso, version_local=None)`. Si coincide, `misma=si` y sin bytes. Si no, el archivo y `misma=no`. Escenario `python3 -m fase1.escenarios revalidar`. Documentado en `docs/codigo.md` y `docs/decisiones.md`. Falta la revisión de Samy. El borde la usa desde F1-S08 (19 nov).
+- [x] **F1-R06** Invalidación desde el origen, con la lista de bordes avisados. Samy la aplica en el borde. (plan 21–22 nov) `invalidar` en `fase1/origen.py` avisa a los bordes de `anotar_bordes` y anota `bordes=borde-1,borde-2`. El borde no borra la copia: la marca `invalidada` y no la devuelve. El pedido siguiente es `miss causa=invalidada` y, si el origen contesta, baja la versión nueva. Escenario `python3 -m fase1.escenarios invalidar`. Documentado en `docs/codigo.md` y `docs/decisiones.md`. Revisado por Samy el 20 nov (observaciones en `docs/decisiones.md`).
+- [x] **F1-R07** Caso en que un borde no recibe el aviso, anotado en el historial. Samy revisa. (plan 21–22 nov) `perder_avisos` en `fase1/borde.py`: el aviso llega, no se aplica, la copia vieja sigue y se anota `invalidacion_perdida`. El origen no lo incluye en `bordes=`. Escenario `python3 -m fase1.escenarios perdida`. Documentado en `docs/codigo.md` y `docs/decisiones.md`. Revisado por Samy el 20 nov (observaciones en `docs/decisiones.md`).
+- [x] **F1-R08** Revalidación del lado origen: misma versión o versión nueva. Samy revisa. (plan 23–24 nov) `responder(pedido_id, recurso, version_local=None)`. Si coincide, `misma=si` y sin bytes. Si no, el archivo y `misma=no`. Escenario `python3 -m fase1.escenarios revalidar`. Documentado en `docs/codigo.md` y `docs/decisiones.md`. Revisado por Samy el 20 nov (observaciones en `docs/decisiones.md`). El borde la usa desde F1-S08 (19 nov).
 - [x] **F1-R09** Provoca la partición del experimento y deja la evidencia en `logs/`. Samy redacta la ficha. (plan 25–26 nov) Corrida de Rubén el 19 nov: `P20_TTL=3 P20_STALE_LIMIT=4 python3 -m fase1.escenarios obsoleto`. En `logs/borde-1.log` quedan `particion estado=cortada`, `hit` fresca, `sirve_obsoleta` con `edad_segundos=1`, `rechaza causa=supera_limite` con `edad_segundos=6` y, al reparar, `revalida renovo=si` y `hit`. El pedido que rechaza `borde-1` lo resuelve `borde-2` (`pedido=010bd0`). La ficha es `docs/experimento-fase1.md`.
 - [x] **F1-R10** `docs/salida-fase1.md`: las cinco respuestas de la compuerta (qué problema resuelve, qué comportamiento tiene que sobrevivir al rediseño, qué hace el código, qué hace Ray, qué semántica de fallo se observó). Samy revisa. (plan 27 nov) Escrito el 19 nov a partir de la corrida de F1-R09. Revisado por Samy el 20 nov: fiel al código. Dos notas para Rubén: «Qué hace Ray» y «Qué sobrevive» dicen que la fase 2 va por `enviar`/`recibir` sobre TCP, y la decisión del 20 nov dice HTTP (alinear README, tablero y este documento); en la tabla de la corrida, en `010bd0`, decir que `borde-1` no borra la copia, que es lo que permite el `revalida renovo=si` del pedido siguiente.
 - [ ] **F1-R11** Revisa el diagrama y el mapa de Samy, y se los explica en voz alta. (plan 27 nov)
@@ -100,12 +100,12 @@ Corrida objetivo: un origen, dos bordes y un cliente, en varios procesos.
 ### Los dos
 
 - [x] **F1-J01** Primera entrada de `docs/decisiones.md`: lenguaje Python + Ray, y el valor inicial de `STALE_LIMIT`. (plan 16–17 nov) Las dos entradas están escritas y revisadas por Samy el 19 nov (observaciones en cada entrada).
-- [~] **F1-J02** Un cliente pide un recurso desconocido y el segundo pedido es hit. El historial se filtra por `pedido_id`. (plan 18–20 nov) `python3 -m fase1.checklist` lo hace y al final imprime `grep "pedido=<id>" logs/*.log` con las seis líneas del primer miss en los cuatro nodos (20 nov). Falta mirarlo juntos.
-- [~] **F1-J03** `registrar` está activo desde la primera operación, con el formato del README. `cifrado = false`. La comprobación 10 del checklist exige que la primera línea de cada nodo sea `listo` y que exista `config cifrado=false` (20 nov, pasa). Falta mirarlo juntos.
-- [~] **F1-J04** Cada archivo de código de esta fase tiene comentario de cabecera, cada función pública tiene su línea de funcionamiento, y `docs/codigo.md` describe todas las piezas de esta fase. Comprobado el 20 nov: los 12 archivos de `fase1/` empiezan con su docstring de responsabilidad y `docs/codigo.md` tiene entrada para cada uno. Falta que Rubén lo confirme.
-- [~] **F1-J05** Los resultados del cliente existen: `hit`, `miss`, `sirve_obsoleta`, `rechaza`, `file_doesnt_exist`. (plan 23–24 nov) El checklist comprueba los cinco en `logs/cliente.log` (20 nov, pasa). Falta mirarlo juntos.
-- [ ] **F1-J06** Checklist juntos. Los diez comportamientos de abajo corren en una corrida repetible. Si algo falla, se anota aquí y se corrige el 29 o el 30. (plan 28 nov; la sesión conjunta se adelanta al 27) La corrida repetible existe desde el 20 nov: `python3 -m fase1.checklist` (unos 40 s) corre arranque + siete escenarios y comprueba los diez en `logs/`; el 20 nov pasaron los diez y los cinco resultados. Las casillas de abajo se marcan en la sesión del 27.
-- [ ] **F1-J07** Texto del issue escrito en local, sin publicarlo. (plan 29–30 nov)
+- [x] **F1-J02** Un cliente pide un recurso desconocido y el segundo pedido es hit. El historial se filtra por `pedido_id`. (plan 18–20 nov) `python3 -m fase1.checklist` lo hace y al final imprime `grep "pedido=<id>" logs/*.log` con las seis líneas del primer miss en los cuatro nodos (20 nov). Rubén lo confirma al correr el checklist.
+- [x] **F1-J03** `registrar` está activo desde la primera operación, con el formato del README. `cifrado = false`. La comprobación 10 del checklist exige que la primera línea de cada nodo sea `listo` y que exista `config cifrado=false` (20 nov, pasa). `cifrado` es `False` en `fase1/config.py`.
+- [x] **F1-J04** Cada archivo de código de esta fase tiene comentario de cabecera, cada función pública tiene su línea de funcionamiento, y `docs/codigo.md` describe todas las piezas de esta fase. Comprobado el 20 nov: los 12 archivos de `fase1/` empiezan con su docstring de responsabilidad y `docs/codigo.md` tiene entrada para cada uno.
+- [x] **F1-J05** Los resultados del cliente existen: `hit`, `miss`, `sirve_obsoleta`, `rechaza`, `file_doesnt_exist`. (plan 23–24 nov) El checklist comprueba los cinco en `logs/cliente.log` (20 nov, pasa).
+- [x] **F1-J06** Checklist juntos. Los diez comportamientos de abajo corren en una corrida repetible. Si algo falla, se anota aquí y se corrige el 29 o el 30. (plan 28 nov; cerrado el 20 nov) `python3 -m fase1.checklist` (unos 40 s) corre arranque + siete escenarios y comprueba los diez en `logs/`; el 20 nov pasaron los diez y los cinco resultados, y las casillas de abajo se marcaron con esa corrida. Rubén lo corre por su lado y, si algo le falla, lo anota aquí.
+- [x] **F1-J07** Texto del issue escrito en local, sin publicarlo. (plan 29–30 nov; escrito el 20 nov) El texto completo, con nombres y grupos, está en `docs/issue-fase1.md`.
 - [ ] **F1-J08** El repositorio se abre sin cuenta. Publican el issue en [matcom/distributed-systems-2026](https://github.com/matcom/distributed-systems-2026). (plan 1 dic)
 
 Texto del issue, y nada más alrededor que haga falta para que se entienda:
@@ -115,8 +115,8 @@ Tema
 P20 — Caché de contenido en el borde y red de distribución
 
 Integrantes
-Rubén — <nombre completo>, grupo <número>
-Samy — <nombre completo>, grupo <número>
+Rubén Martínez Rojas, grupo C411
+Samy R. Sosa Justiz, grupo C412
 
 Link público
 https://github.com/ChickenLittle02/Distributed_SystemFP
@@ -124,16 +124,18 @@ https://github.com/ChickenLittle02/Distributed_SystemFP
 
 ### Los diez comportamientos (se marcan dentro de F1-J06)
 
-- [ ] Hit de una copia fresca.
-- [ ] Miss si no está, y bajada desde el origen.
-- [ ] Versión y expiración por TTL.
-- [ ] Expulsión LRU cuando el borde se llena.
-- [ ] Invalidación que llega a los dos bordes. La copia no se borra: queda marcada no válida y no se devuelve aunque la pidan.
-- [ ] Un borde no aplica la invalidación, y eso queda anotado.
-- [ ] Revalidación cuando la copia expiró y el origen responde.
-- [ ] Un borde no responde y el selector usa el otro.
-- [ ] Origen inalcanzable: se sirve la copia si su edad es menor o igual que `STALE_LIMIT`, y se rechaza si la supera.
-- [ ] `registrar` desde la primera operación. `cifrado = false`.
+Marcados el 20 nov con `python3 -m fase1.checklist` (`P20_TTL=3 P20_STALE_LIMIT=4`): cada uno tiene su línea de evidencia en la salida del checklist y en `logs/`.
+
+- [x] Hit de una copia fresca.
+- [x] Miss si no está, y bajada desde el origen.
+- [x] Versión y expiración por TTL.
+- [x] Expulsión LRU cuando el borde se llena.
+- [x] Invalidación que llega a los dos bordes. La copia no se borra: queda marcada no válida y no se devuelve aunque la pidan.
+- [x] Un borde no aplica la invalidación, y eso queda anotado.
+- [x] Revalidación cuando la copia expiró y el origen responde.
+- [x] Un borde no responde y el selector usa el otro.
+- [x] Origen inalcanzable: se sirve la copia si su edad es menor o igual que `STALE_LIMIT`, y se rechaza si la supera.
+- [x] `registrar` desde la primera operación. `cifrado = false`.
 
 ### Cierre de la fase 1
 

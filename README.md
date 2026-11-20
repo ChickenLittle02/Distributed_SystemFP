@@ -1,6 +1,31 @@
 # Distributed_SystemFP
 Proyecto Final de la asignatura Sistemas Distribuidos
 
+Equipo: Rubén Martínez Rojas (C411) y Samy R. Sosa Justiz (C412). Tema P20 del catálogo.
+
+## Cómo correr la fase 1 (prototipo con Ray)
+
+Python 3.9 o superior y Ray (`pip install -r requirements.txt`). Desde la raíz del repositorio:
+
+```text
+python3 -m fase1.arrancar_sistema      # origen, dos bordes y cliente: miss, hit, file_doesnt_exist
+python3 -m fase1.escenarios todos      # TTL, LRU, selector, invalidación, aviso perdido, revalidación, partición
+python3 -m fase1.checklist             # los diez comportamientos comprobados en logs/ (~40 s)
+```
+
+Cada nodo deja su historial en `logs/<nodo>.log` con el formato de [Registro de operaciones](#registro-de-operaciones);
+`grep "pedido=<id>" logs/*.log` reconstruye un pedido. Los valores provisionales (TTL 30 s, `STALE_LIMIT` 60 s) se
+acortan con `P20_TTL=3 P20_STALE_LIMIT=4` para no esperar.
+
+Dónde está cada cosa: el tablero de tareas es [schedule.md](schedule.md); lo visible desde fuera,
+[docs/contrato.md](docs/contrato.md); los procesos y qué pone Ray, [docs/diagrama.md](docs/diagrama.md) y
+[docs/mapa-ray.md](docs/mapa-ray.md); el experimento de partición, [docs/experimento-fase1.md](docs/experimento-fase1.md);
+las cinco respuestas de la fase, [docs/salida-fase1.md](docs/salida-fase1.md); cada decisión de diseño,
+[docs/decisiones.md](docs/decisiones.md); el mapa del código, [docs/codigo.md](docs/codigo.md). La declaración de
+uso de asistentes de IA está en [ai_use.md](ai_use.md).
+
+El texto que sigue es el enunciado ampliado del proyecto.
+
 # Caché de contenido en el borde y red de distribución
 
 ## Descripción
