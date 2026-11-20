@@ -26,6 +26,7 @@ fase1/
   arrancar_borde.py     Arranca Ray, origen y un borde vacío
   arrancar_sistema.py   Arranca origen, dos bordes y cliente; tres pedidos (miss, hit, file_doesnt_exist)
   escenarios.py         Escenarios ttl, lru, selector, invalidar, perdida, revalidar, obsoleto, invalidada, origen_caido
+  checklist.py          Corrida repetible del checklist: los diez comportamientos comprobados en logs/ (F1-J06)
 contenido/
   apunte.txt            Archivo de prueba que reparte el origen
   apunte-2.txt          Segundo archivo de prueba, para llenar el borde (F1-S06)
@@ -391,3 +392,11 @@ El segundo pedido deja solo dos líneas en el borde y el cliente; el origen no i
   - `origen_caido`: `ray.kill` del origen; hit mientras la copia es fresca, y al expirar `nodo_caido destino=origen` + `sirve_obsoleta`.
 - Qué no hace: no prueba un `timeout` de verdad (origen o borde lentos; ficha F3-R03). No es la corrida formal del checklist (F1-J06), aunque la cubre.
 - Tareas: F1-S05, F1-S06, F1-S07, F1-S08, F1-S09 (Samy; revisa Rubén, pendiente), F1-R06 (`invalidar`), F1-R07 (`perdida`) y F1-R08 (`revalidar`; implementa Rubén, revisa Samy, pendiente).
+
+## fase1/checklist.py
+
+- Qué es: la corrida repetible del checklist de la fase 1 (F1-J06). Corre seguidos `arrancar_sistema` y los escenarios `ttl`, `lru`, `selector`, `invalidar`, `perdida`, `obsoleto` e `invalidada`, lee solo las líneas que esa corrida dejó en `logs/` y comprueba, con una expresión regular por línea esperada, los diez comportamientos del tablero y los cinco resultados del cliente (F1-J05).
+- Dónde: `fase1/checklist.py`. Se corre con `python3 -m fase1.checklist` (tarda alrededor de un minuto). Pone `P20_TTL=3` y `P20_STALE_LIMIT=4` si no vienen en el entorno.
+- Qué hace: anota una línea `checklist pedido=arranque config cifrado=false ttl=… stale_limit=…` (`logs/checklist.log`), guarda el tamaño de cada log al empezar, corre los pasos, y después imprime una tabla `[x]`/`[ ]` por comportamiento con las líneas que lo prueban (o `FALTA nodo: /patrón/`). Para «`registrar` desde la primera operación» exige que la primera línea nueva de cada nodo sea `listo`. Al final imprime el recorrido de un pedido filtrado por `pedido_id` en los cuatro logs (F1-J02). Termina con código 1 si falta algo.
+- Qué no hace: no borra `logs/` ni decide nada del sistema; no prueba `timeout` real ni `origen_caido` (ese escenario existe aparte). No sustituye mirarlo juntos: es lo que se corre en esa sesión.
+- Tareas: F1-J06 (y evidencia para F1-J02, F1-J03, F1-J05). Implementa: Samy. Revisa: Rubén (pendiente).

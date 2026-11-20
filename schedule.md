@@ -100,11 +100,11 @@ Corrida objetivo: un origen, dos bordes y un cliente, en varios procesos.
 ### Los dos
 
 - [x] **F1-J01** Primera entrada de `docs/decisiones.md`: lenguaje Python + Ray, y el valor inicial de `STALE_LIMIT`. (plan 16–17 nov) Las dos entradas están escritas y revisadas por Samy el 19 nov (observaciones en cada entrada).
-- [ ] **F1-J02** Un cliente pide un recurso desconocido y el segundo pedido es hit. El historial se filtra por `pedido_id`. (plan 18–20 nov) La corrida de `fase1/arrancar_sistema.py` ya lo hace (18 nov, ver `docs/codigo.md`); falta mirarlo juntos y filtrar `logs/*.log` por `pedido_id`.
-- [ ] **F1-J03** `registrar` está activo desde la primera operación, con el formato del README. `cifrado = false`.
-- [ ] **F1-J04** Cada archivo de código de esta fase tiene comentario de cabecera, cada función pública tiene su línea de funcionamiento, y `docs/codigo.md` describe todas las piezas de esta fase.
-- [~] **F1-J05** Los resultados del cliente existen: `hit`, `miss`, `sirve_obsoleta`, `rechaza`, `file_doesnt_exist`. (plan 23–24 nov) Los cinco salen en `fase1/escenarios.py` desde el 19 nov (`obsoleto` e `invalidada` dan los dos últimos). Falta mirarlo juntos.
-- [ ] **F1-J06** Checklist juntos. Los diez comportamientos de abajo corren en una corrida repetible. Si algo falla, se anota aquí y se corrige el 29 o el 30. (plan 28 nov)
+- [~] **F1-J02** Un cliente pide un recurso desconocido y el segundo pedido es hit. El historial se filtra por `pedido_id`. (plan 18–20 nov) `python3 -m fase1.checklist` lo hace y al final imprime `grep "pedido=<id>" logs/*.log` con las seis líneas del primer miss en los cuatro nodos (20 nov). Falta mirarlo juntos.
+- [~] **F1-J03** `registrar` está activo desde la primera operación, con el formato del README. `cifrado = false`. La comprobación 10 del checklist exige que la primera línea de cada nodo sea `listo` y que exista `config cifrado=false` (20 nov, pasa). Falta mirarlo juntos.
+- [~] **F1-J04** Cada archivo de código de esta fase tiene comentario de cabecera, cada función pública tiene su línea de funcionamiento, y `docs/codigo.md` describe todas las piezas de esta fase. Comprobado el 20 nov: los 12 archivos de `fase1/` empiezan con su docstring de responsabilidad y `docs/codigo.md` tiene entrada para cada uno. Falta que Rubén lo confirme.
+- [~] **F1-J05** Los resultados del cliente existen: `hit`, `miss`, `sirve_obsoleta`, `rechaza`, `file_doesnt_exist`. (plan 23–24 nov) El checklist comprueba los cinco en `logs/cliente.log` (20 nov, pasa). Falta mirarlo juntos.
+- [ ] **F1-J06** Checklist juntos. Los diez comportamientos de abajo corren en una corrida repetible. Si algo falla, se anota aquí y se corrige el 29 o el 30. (plan 28 nov; la sesión conjunta se adelanta al 27) La corrida repetible existe desde el 20 nov: `python3 -m fase1.checklist` (unos 40 s) corre arranque + siete escenarios y comprueba los diez en `logs/`; el 20 nov pasaron los diez y los cinco resultados. Las casillas de abajo se marcan en la sesión del 27.
 - [ ] **F1-J07** Texto del issue escrito en local, sin publicarlo. (plan 29–30 nov)
 - [ ] **F1-J08** El repositorio se abre sin cuenta. Publican el issue en [matcom/distributed-systems-2026](https://github.com/matcom/distributed-systems-2026). (plan 1 dic)
 
