@@ -94,7 +94,7 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Dónde está en el código: `docs/contrato.md`.
 - Implementa: Rubén
 - Revisa: Samy (19 nov). Observaciones de la revisión: implementado en `fase1/borde.py` (`_con_respuesta_del_origen`: `revalida … renovo=si` y luego `hit estado=fresca`; se ve en `fase1.escenarios ttl`). El caso `revalida … renovo=no bajo_otra=si` seguido de `guarda` es el estado «actualizada» del README §5: no es un estado guardado, es la transición. Hoy el borde revalida bajando el archivo entero y comparando la versión, porque `responder` no acepta una versión local; funciona, pero no es una revalidación sin bytes.
-- Pregunta abierta para Rubén (F1-R08), propuesta de Samy el 19 nov: `responder(pedido_id, recurso, version_local=None)`. Si `version_local` coincide con la del origen, devuelve `{"existe": True, "misma": True, "version": N}` sin `contenido` y anota `responde … version=N misma=si`; si no coincide, devuelve el archivo como hoy. Con esa firma F1-S08 del lado borde es solo pasar `copia.version` en la llamada y tratar `misma`.
+- Pregunta abierta para Rubén (F1-R08), propuesta de Samy el 19 nov: `responder(pedido_id, recurso, version_local=None)`. Resuelta el mismo día: se adoptó esa firma. Ver «Revalidación del origen sin bytes si la versión coincide».
 
 ### 2026-11-16 — Cuándo el borde borra una copia
 
@@ -209,7 +209,7 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 
 ### 2026-11-19 — Cómo se simula una invalidación que un borde no aplica
 
-- Decisión: `perder_avisos(True)` en un borde hace que `invalidar` no borre la copia y anote `invalidacion_perdida` con el recurso y la versión que se quedó. El método devuelve `None` y el origen no pone a ese borde en `bordes=`. La copia sigue la regla de frescura: si el TTL no venció, el siguiente pedido a ese borde es `hit` de la versión vieja. El otro borde, si aplicó el aviso, queda vacío y el pedido de después baja la versión nueva.
+- Decisión: `perder_avisos(True)` en un borde hace que `invalidar` no marque la copia y anote `invalidacion_perdida` con el recurso y la versión que se quedó. El método devuelve `None` y el origen no pone a ese borde en `bordes=`. La copia sigue la regla de frescura: si el TTL no venció, el siguiente pedido a ese borde es `hit` de la versión vieja. El otro borde, si aplicó el aviso, deja la copia marcada `invalidada`.
 - Alternativas consideradas: no llamar a ese borde desde el origen (entonces el borde no puede escribir la línea, y el README la asigna al borde); matar el actor (eso es `nodo_caido`: el cliente tampoco puede pedirle, y no queda la copia servible); marcar la copia `invalidada` sin borrarla en el borde que sí recibió el aviso.
 - Por qué esta: el tablero pide el caso en que un borde no aplica la invalidación y que eso quede anotado. En Ray, si el actor vive, la llamada llega. El interruptor es la simulación: el aviso entra y no se aplica. No es un borde caído. La decisión del 16 nov ya decía que la copia que no recibió la invalidación sigue la regla de frescura.
 - Qué no resuelve: el borde sabe que soltó el aviso porque el interruptor es local. En la fase 2 un mensaje perdido no llega, y el borde no escribiría la línea por sí solo. Aquí la escribe para que el historial de la fase 1 tenga la evidencia. Un actor ya muerto sigue sin línea `invalidacion_perdida`.
@@ -217,12 +217,21 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Implementa: Rubén
 - Revisa: Samy (pendiente)
 
-### 2026-11-19 — Corrección pendiente: el aviso recibido no borra la copia
+### 2026-11-19 — El aviso recibido marca la copia, no la borra
 
-- Decisión: cuando el borde recibe la invalidación, no borra el archivo. Deja la copia marcada como no válida y no la devuelve aunque se la pidan. El código de hoy hace lo contrario: `invalidar` en `fase1/borde.py` la saca de `_copias`. Hay que cambiar ese caso. F1-R06 sigue abierta por esto.
-- Alternativas consideradas: seguir borrándola al recibir, como dice el contrato del 16 nov («Llega la invalidación de esa copia»).
-- Por qué esta: la copia invalidada tiene que seguir en el borde para poder negarla. Si se borra, el pedido siguiente parece un `miss causa=no_esta` y no se distingue de un archivo que nunca estuvo.
-- Qué no resuelve: el código todavía no lo hace. Tampoco está escrito qué resultado ve el cliente en ese pedido (`miss causa=invalidada` y bajada de la versión nueva, o `rechaza` si el origen no contesta). El aviso que no se aplica (F1-R07) no cambia: esa copia sigue válida y se puede devolver.
-- Dónde está en el código: hoy, el borrado está en `fase1/borde.py`, método `invalidar`. La corrección todavía no.
-- Implementa: Rubén (pendiente de corregir)
+- Decisión: cuando el borde recibe la invalidación, no borra el archivo. Deja la copia marcada como no válida (`Copia.invalidada`) y no la devuelve aunque se la pidan. El pedido anota `miss causa=invalidada` y pregunta al origen. Si el origen entrega el archivo, el cliente ve `miss` y esa copia nueva reemplaza a la invalidada. Si dice que no está, ahí sí se borra (`borra`). `STALE_LIMIT` no alcanza para servirla. El aviso que no se aplica (F1-R07) no cambia: esa copia sigue válida y se puede devolver.
+- Alternativas consideradas: borrarla al recibir, como decía el contrato del 16 nov; devolverla igual si todavía estaba fresca.
+- Por qué esta: si se borra, el pedido siguiente parece un `miss causa=no_esta` y no se distingue de un archivo que nunca estuvo. La copia tiene que seguir para poder negarla.
+- Qué no resuelve: si el origen no contesta, el pedido se queda esperando. El tiempo de espera y el `rechaza` de ese caso llegan con F1-S09.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-19 — Revalidación del origen sin bytes si la versión coincide
+
+- Decisión: `responder(pedido_id, recurso, version_local=None)`. Si `version_local` es igual a la versión del disco, el origen responde `misma=si` y no manda bytes. Si no es igual, manda el archivo y anota `misma=no`. Si `version_local` no viene, la llamada sigue siendo una bajada normal, con bytes. Si el archivo no está, `file_doesnt_exist`, aunque haya venido `version_local`. La comparación es por igualdad.
+- Alternativas consideradas: un método aparte `revalidar` que solo diga si es la misma versión, y dejar el archivo siempre en `responder`; comparar con «mayor que» en vez de igualdad.
+- Por qué esta: es la propuesta de Samy del 19 nov, y es lo que hace una caché HTTP con `If-None-Match`: `304 Not Modified` sin cuerpo si el validador coincide, y `200` con el archivo si cambió. Una sola llamada le basta al borde. Igualdad, y no «mayor que», porque el número es una etiqueta: si el origen reinicia y vuelve a 1, esa es la versión de referencia.
+- Qué no resuelve: el borde todavía baja el archivo entero para revalidar. Pasar `copia.version` y tratar `misma` es F1-S08.
+- Dónde está en el código: `fase1/origen.py`, método `responder`. Escenario `python3 -m fase1.escenarios revalidar`.
+- Implementa: Rubén
 - Revisa: Samy (pendiente)

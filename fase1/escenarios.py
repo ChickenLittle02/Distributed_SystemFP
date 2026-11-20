@@ -4,8 +4,8 @@ Responsabilidad: levantar origen, dos bordes y cliente (como
 fase1/arrancar_sistema.py) y provocar, uno por uno, los comportamientos
 que el tablero pide ver en el historial: expiración por TTL, expulsión
 LRU, el paso a otro borde cuando uno no responde, y la invalidación que
-sale del origen hacia los dos bordes (F1-R06), y el aviso que un borde
-no aplica (F1-R07).
+sale del origen hacia los dos bordes (F1-R06), el aviso que un borde
+no aplica (F1-R07) y la revalidación del origen sin bytes (F1-R08).
 No es la corrida del checklist (F1-J06): esa se arma cuando el borde tenga
 la regla de obsoleto. No decide nada: solo pide y muestra lo que anotan
 los nodos.
@@ -17,7 +17,8 @@ Cómo se corre, desde la raíz del repositorio:
     python3 -m fase1.escenarios selector   # mata borde-1 y pide otra vez
     python3 -m fase1.escenarios invalidar  # el origen avisa a los dos bordes
     python3 -m fase1.escenarios perdida    # borde-2 no aplica el aviso
-    python3 -m fase1.escenarios todos      # los cinco seguidos
+    python3 -m fase1.escenarios revalidar  # misma versión sin bytes, o versión nueva
+    python3 -m fase1.escenarios todos      # los seis seguidos
 
 Para no esperar los 30 s del TTL provisional: P20_TTL=3.
 """
@@ -149,11 +150,13 @@ def escenario_invalidar(cfg: Config) -> None:
         print("--- el origen invalida: versión nueva y bordes que contestaron", flush=True)
         aviso = ray.get(origen.invalidar.remote("inv-1", "apunte-inv.txt"))
         print(f"  => version={aviso['version']} bordes={aviso['bordes']}", flush=True)
-        print("--- estado después: la copia ya no está en ningún borde", flush=True)
+        print("--- estado después: la copia sigue, marcada invalidada", flush=True)
         for nombre, borde in bordes.items():
-            print(f"    {nombre}: {list(ray.get(borde.estado.remote()))}", flush=True)
-        print("--- el siguiente pedido baja la versión nueva (miss)", flush=True)
+            print(f"    {nombre}: {ray.get(borde.estado.remote())}", flush=True)
+        print("--- pedirla no devuelve la copia invalidada: miss de la versión nueva", flush=True)
         _mostrar(ray.get(cliente.pedir.remote("apunte-inv.txt")))
+        print("--- borde-2 sigue invalidada: nadie se la pidió después del aviso", flush=True)
+        print(f"    borde-2: {ray.get(bordes['borde-2'].estado.remote())}", flush=True)
     finally:
         ruta.unlink(missing_ok=True)
 
@@ -181,7 +184,7 @@ def escenario_perdida(cfg: Config) -> None:
         ruta.write_text("archivo para invalidar, version nueva\n", encoding="utf-8")
         aviso = ray.get(origen.invalidar.remote("inv-2", "apunte-inv.txt"))
         print(f"  => version={aviso['version']} bordes={aviso['bordes']}", flush=True)
-        print("--- estado: solo el borde que aplicó el aviso quedó sin la copia", flush=True)
+        print("--- estado: el que aplicó el aviso la dejó invalidada; el otro la conserva", flush=True)
         for nombre, borde in bordes.items():
             print(f"    {nombre}: {ray.get(borde.estado.remote())}", flush=True)
         print(f"--- pedir a {segundo}: la copia vieja sigue fresca (hit version 1)", flush=True)
@@ -193,12 +196,42 @@ def escenario_perdida(cfg: Config) -> None:
         ruta.unlink(missing_ok=True)
 
 
+def escenario_revalidar(cfg: Config) -> None:
+    """F1-R08: misma versión no manda bytes; otra versión manda el archivo.
+
+    Entra: la Config (no cambia el escenario). Sale: imprime las tres
+    respuestas de responder. Si el otro nodo no contesta: no aplica;
+    solo habla el origen. El borde todavía no pasa version_local (F1-S08).
+    """
+    print("=== Revalidar: si la versión local coincide, el origen no manda bytes", flush=True)
+    origen = Origen.remote()
+    ray.get(origen.listo.remote())
+    ruta = Path(__file__).resolve().parent.parent / "contenido" / "apunte-rev.txt"
+    try:
+        ruta.write_text("version uno\n", encoding="utf-8")
+        print("--- sin version_local: baja el archivo (version 1)", flush=True)
+        baja = ray.get(origen.responder.remote("rev-1", "apunte-rev.txt"))
+        print(f"  => version={baja['version']} bytes={len(baja['contenido'] or b'')}", flush=True)
+        print("--- version_local=1: misma versión, sin bytes", flush=True)
+        misma = ray.get(origen.responder.remote("rev-2", "apunte-rev.txt", 1))
+        print(f"  => misma={misma.get('misma')} version={misma['version']} "
+              f"bytes={len(misma['contenido'] or b'')}", flush=True)
+        ruta.write_text("version dos\n", encoding="utf-8")
+        print("--- version_local=1 y el archivo cambió: versión nueva, con bytes", flush=True)
+        otra = ray.get(origen.responder.remote("rev-3", "apunte-rev.txt", 1))
+        print(f"  => misma={otra.get('misma')} version={otra['version']} "
+              f"bytes={len(otra['contenido'] or b'')}", flush=True)
+    finally:
+        ruta.unlink(missing_ok=True)
+
+
 ESCENARIOS = {
     "ttl": escenario_ttl,
     "lru": escenario_lru,
     "selector": escenario_selector,
     "invalidar": escenario_invalidar,
     "perdida": escenario_perdida,
+    "revalidar": escenario_revalidar,
 }
 
 

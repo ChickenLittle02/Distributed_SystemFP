@@ -2,17 +2,16 @@
 
 Responsabilidad: guardar copias de los recursos con su versión y su
 expiración (TTL), decidir hit o miss, pedir al origen cuando no hay copia
-usable, guardar lo que baja, expulsar por LRU cuando el borde se llena y
-borrar la copia cuando el origen avisa que ya no vale. Si perder_avisos
-está activo, el aviso no se aplica: la copia sigue y se anota
+usable, guardar lo que baja y expulsar por LRU cuando el borde se llena.
+Cuando el origen avisa que una copia ya no vale, no se borra: se marca
+invalidada y no se devuelve aunque la pidan. Si perder_avisos está
+activo, el aviso no se aplica: la copia sigue válida y se anota
 invalidacion_perdida (F1-R07). Esa copia se sigue sirviendo con el TTL.
 Anota cada decisión con registrar: hit, miss (con causa), pide_origen,
 revalida, guarda, expulsion, borra, invalidacion_recibida, invalidacion_perdida.
 Todavía no hay tiempo de espera al origen ni STALE_LIMIT (F1-S09: hoy el
 origen que no contesta bloquea el pedido), ni el mensaje de revalidación
-sin bajar los bytes (F1-S08, cuando el origen tenga F1-R08). No hay estado
-«invalidada»: si el aviso se aplica, la copia se borra y el pedido
-siguiente es miss causa=no_esta.
+sin bajar los bytes (F1-S08, cuando el origen tenga F1-R08).
 No es el origen: no tiene la versión de referencia ni decide a quién
 avisar. No es el selector: no elige entre bordes; eso vive junto al
 cliente. No abre sockets: en la fase 1 habla con el origen por una
@@ -40,12 +39,14 @@ class Copia:
     version y contenido son los que entregó el origen. guardada_en es
     time.time() al guardar o al renovar; expira_en = guardada_en + TTL.
     Antes de expira_en la copia está fresca; después, obsoleta.
+    invalidada la saca de servicio sin borrarla: no se devuelve.
     """
 
     version: int
     contenido: bytes
     guardada_en: float
     expira_en: float
+    invalidada: bool = False
 
     def fresca(self, ahora: float) -> bool:
         """True si todavía no pasó el TTL."""
@@ -80,7 +81,7 @@ class Borde:
         # y el primer pedido vuelve a ser miss.
         self._copias: "OrderedDict[str, Copia]" = OrderedDict()
         # Simulación de F1-R07: Ray entrega la llamada si el actor vive.
-        # Con esto activo, invalidar no borra la copia y anota el aviso perdido.
+        # Con esto activo, invalidar no marca la copia y anota el aviso perdido.
         self._pierde_avisos = False
 
     # ----------------------------------------------------------------- arranque
@@ -98,28 +99,35 @@ class Borde:
     # ------------------------------------------------------------------- pedido
 
     def pedir(self, pedido_id: str, recurso: str) -> Dict[str, Any]:
-        """Atiende un pedido del cliente: hit si hay copia fresca, si no va al origen.
+        """Atiende un pedido del cliente: hit si hay copia fresca y válida.
 
         Entra: pedido_id (lo creó el cliente) y el nombre del recurso.
         Sale: dict con resultado (hit, miss o file_doesnt_exist), version y
         contenido, con el formato de docs/contrato.md.
         Si el otro nodo no contesta: espera (sin tiempo límite hasta F1-S09).
+        Una copia invalidada no se devuelve: se anota miss causa=invalidada
+        y se pregunta al origen.
         """
         ahora = time.time()
         copia = self._copias.get(recurso)
 
-        # 1. Copia fresca: hit, sin hablar con el origen. Cuenta como uso
-        #    reciente para LRU.
-        if copia is not None and copia.fresca(ahora):
+        # 1. Copia fresca y no invalidada: hit, sin hablar con el origen.
+        #    Cuenta como uso reciente para LRU.
+        if copia is not None and not copia.invalidada and copia.fresca(ahora):
             self._copias.move_to_end(recurso)
             registrar(self.nombre, pedido_id, "hit", recurso=recurso,
                       version=copia.version, estado="fresca")
             return self._respuesta("hit", copia)
 
-        # 2. No hay copia usable: miss con su causa (no_esta o expirada).
+        # 2. No hay copia usable: miss con su causa.
         if copia is None:
             registrar(self.nombre, pedido_id, "miss", recurso=recurso, causa="no_esta")
             registrar(self.nombre, pedido_id, "pide_origen", recurso=recurso)
+        elif copia.invalidada:
+            registrar(self.nombre, pedido_id, "miss", recurso=recurso, causa="invalidada",
+                      version=copia.version)
+            registrar(self.nombre, pedido_id, "pide_origen", recurso=recurso,
+                      version=copia.version)
         else:
             registrar(self.nombre, pedido_id, "miss", recurso=recurso, causa="expirada",
                       version=copia.version, expiro=_hora(copia.expira_en),
@@ -137,13 +145,17 @@ class Borde:
         """Qué copias hay y en qué estado, para pruebas y para el experimento.
 
         Entra: nada. Sale: recurso -> {version, estado, expira, edad_obsoleta},
-        en orden LRU (la primera es la próxima en salir). Vacío si no hay copias.
+        en orden LRU (la primera es la próxima en salir). estado es
+        invalidada, fresca u obsoleta. Vacío si no hay copias.
         """
         ahora = time.time()
         return {
             rec: {
                 "version": c.version,
-                "estado": "fresca" if c.fresca(ahora) else "obsoleta",
+                "estado": (
+                    "invalidada" if c.invalidada
+                    else "fresca" if c.fresca(ahora) else "obsoleta"
+                ),
                 "expira": _hora(c.expira_en),
                 "edad_obsoleta": max(0, int(ahora - c.expira_en)),
             }
@@ -156,8 +168,8 @@ class Borde:
         Entra: True para no aplicarlos, False para volver a aplicarlos.
         Sale: el valor que quedó guardado.
         Si el otro nodo no contesta: no aplica; no llama a nadie.
-        La copia que ya está se queda y el siguiente pedido la sirve si
-        sigue fresca. No es un borde muerto: el cliente puede seguir pidiendo.
+        La copia que ya está se queda válida y el siguiente pedido la sirve
+        si sigue fresca. No es un borde muerto: el cliente puede seguir pidiendo.
         """
         self._pierde_avisos = activo
         return self._pierde_avisos
@@ -170,8 +182,8 @@ class Borde:
         Sale: el nombre de este borde si aplicó el aviso, o None si no lo
         aplicó (perder_avisos). El origen solo cuenta el nombre como avisado.
         Si el otro nodo no contesta: no aplica; esta llamada es la que recibe.
-        Si aplica, el siguiente pedido es un miss causa=no_esta. Si no aplica,
-        la copia sigue y se anota invalidacion_perdida.
+        Si aplica, la copia se marca invalidada y no se devuelve. Si no
+        aplica, sigue válida y se anota invalidacion_perdida.
         """
         if self._pierde_avisos:
             copia = self._copias.get(recurso)
@@ -180,10 +192,14 @@ class Borde:
                 datos["version"] = copia.version
             registrar(self.nombre, pedido_id, "invalidacion_perdida", **datos)
             return None
-        self._copias.pop(recurso, None)
-        datos: Dict[str, Any] = {"recurso": recurso}
+        copia = self._copias.get(recurso)
+        if copia is not None:
+            copia.invalidada = True
+        datos = {"recurso": recurso}
         if version is not None:
             datos["version"] = version
+        elif copia is not None:
+            datos["version"] = copia.version
         registrar(self.nombre, pedido_id, "invalidacion_recibida", **datos)
         return self.nombre
 
@@ -205,13 +221,15 @@ class Borde:
         #    copia sigue, el TTL vuelve a empezar y el cliente ve hit (contrato,
         #    «Frescura»; decisión del 16 nov «Misma versión en la revalidación
         #    es hit»). Es la revalidación mínima: hoy baja el archivo entero
-        #    para saber la versión. F1-S08 pasará copia.version al origen y
-        #    tratará la respuesta sin bytes cuando exista F1-R08
-        #    (propuesta en docs/decisiones.md, revisión de esa entrada).
+        #    para saber la versión. responder ya acepta version_local
+        #    (F1-R08): si coincide, no manda bytes. F1-S08 es quien pasa
+        #    copia.version y trata el campo misma.
         #    Se compara con igualdad, no con «mayor que»: el origen manda y
         #    los números son etiquetas (si el origen reinicia y vuelve a 1,
         #    el borde reemplaza su copia por lo que el origen dice).
-        if copia is not None and copia.version == r["version"]:
+        # Una copia invalidada no se renueva como hit: el cliente no recibe
+        # esos bytes. Lo que mande el origen se guarda como copia nueva (miss).
+        if copia is not None and not copia.invalidada and copia.version == r["version"]:
             self._renovar(recurso, copia)
             registrar(self.nombre, pedido_id, "revalida", recurso=recurso,
                       version_local=copia.version, version_origen=r["version"],
@@ -220,12 +238,19 @@ class Borde:
                       version=copia.version, estado="fresca")
             return self._respuesta("hit", copia)
 
-        # c. El origen entregó otra versión (o no había copia): se guarda y
-        #    se responde miss.
+        # c. El origen entregó otra versión, o la copia estaba invalidada:
+        #    se guarda lo que mandó el origen y se responde miss. bajo_otra
+        #    solo si el número de versión cambió.
         if copia is not None:
-            registrar(self.nombre, pedido_id, "revalida", recurso=recurso,
-                      version_local=copia.version, version_origen=r["version"],
-                      renovo="no", bajo_otra="si")
+            datos_rev: Dict[str, Any] = {
+                "recurso": recurso,
+                "version_local": copia.version,
+                "version_origen": r["version"],
+                "renovo": "no",
+            }
+            if copia.version != r["version"]:
+                datos_rev["bajo_otra"] = "si"
+            registrar(self.nombre, pedido_id, "revalida", **datos_rev)
         nueva = self._guardar(pedido_id, recurso, r["version"], r["contenido"])
         return self._respuesta("miss", nueva)
 

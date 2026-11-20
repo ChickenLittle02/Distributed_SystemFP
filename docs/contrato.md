@@ -61,7 +61,8 @@ Si el borde pregunta al origen y el origen confirma la misma versión, el client
 El borde borra la copia en cuanto se entera de que no puede seguir guardándola:
 
 - Al pedirla, el origen responde que ya no está. El cliente ve `file_doesnt_exist`.
-- Llega la invalidación de esa copia.
 - La edad obsoleta ya pasó `STALE_LIMIT` y el origen responde que esa copia es obsoleta. Esa copia vieja se borra. Si el origen además entrega una versión nueva, el cliente ve `miss` y el borde guarda ese archivo.
+
+Si llega la invalidación, la copia no se borra. Se marca no válida y no se devuelve aunque la pidan. El borde pregunta al origen: si entrega el archivo, el cliente ve `miss` y esa copia nueva reemplaza a la invalidada; si dice que no está, ahí sí se borra.
 
 Si el origen sigue en silencio, la copia no se borra. Solo sale del borde si la expulsión LRU la elige porque el borde se llenó. Mientras permanece, se entrega con `sirve_obsoleta` si no está invalidada y la edad obsoleta cabe en `STALE_LIMIT`. Si ya pasó ese límite, no se entrega y el resultado puede ser `rechaza`, pero la copia sigue guardada.

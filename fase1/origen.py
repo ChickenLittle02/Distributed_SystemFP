@@ -7,8 +7,8 @@ una copia deja de valer. Anota responde e invalidar en el historial.
 No es el borde: no hace hit/miss, TTL, STALE_LIMIT ni expulsión, y no
 borra las copias (eso lo hace el borde al recibir el aviso). Si un borde
 no aplica el aviso, la línea invalidacion_perdida la escribe él (F1-R07);
-un actor ya muerto no puede escribirla. No ofrece la API fina de
-revalidación (F1-R08); responder ya entrega la versión actual del disco.
+un actor ya muerto no puede escribirla. responder acepta la versión
+local del borde (F1-R08): si coincide, no manda los bytes.
 """
 
 from __future__ import annotations
@@ -55,14 +55,20 @@ class Origen:
         registrar(self.nombre, "arranque", "listo")
         return self.nombre
 
-    def responder(self, pedido_id: str, recurso: str) -> Dict[str, Any]:
-        """Entrega el archivo actual o dice que no existe.
+    def responder(self, pedido_id: str, recurso: str,
+                   version_local: Optional[int] = None) -> Dict[str, Any]:
+        """Entrega el archivo actual, confirma la misma versión, o dice que no existe.
 
-        Entra: pedido_id (lo copia el borde desde el cliente) y el nombre
-        del recurso (solo el nombre del archivo, sin rutas).
-        Sale: dict con existe, version, contenido y, si falta, resultado
-        file_doesnt_exist. Siempre anota en el historial.
+        Entra: pedido_id (lo copia el borde desde el cliente), el nombre
+        del recurso (solo el nombre del archivo, sin rutas) y, si el borde
+        revalida, version_local (la versión que ya tiene). None pide el archivo.
+        Sale: dict con existe, version, contenido, resultado y, si vino
+        version_local, misma. Si version_local coincide, contenido es None.
+        Si no coincide o no vino version_local, van los bytes. Si falta el
+        archivo, resultado file_doesnt_exist, sin bytes.
         Si el otro nodo no contesta: no aplica; solo lee disco local.
+        La comparación es por igualdad: el número es una etiqueta, no un
+        «más nuevo».
         """
         ruta = self._ruta_segura(recurso)
         if ruta is None or not ruta.is_file():
@@ -81,19 +87,36 @@ class Origen:
             }
 
         version, contenido = self._version_y_bytes(recurso, ruta)
-        registrar(
-            self.nombre,
-            pedido_id,
-            "responde",
-            recurso=recurso,
-            version=version,
-        )
-        return {
+        if version_local is not None and version_local == version:
+            registrar(
+                self.nombre,
+                pedido_id,
+                "responde",
+                recurso=recurso,
+                version=version,
+                misma="si",
+            )
+            return {
+                "existe": True,
+                "misma": True,
+                "version": version,
+                "contenido": None,
+                "resultado": "responde",
+            }
+
+        datos: Dict[str, Any] = {"recurso": recurso, "version": version}
+        if version_local is not None:
+            datos["misma"] = "no"
+        registrar(self.nombre, pedido_id, "responde", **datos)
+        respuesta: Dict[str, Any] = {
             "existe": True,
             "version": version,
             "contenido": contenido,
             "resultado": "responde",
         }
+        if version_local is not None:
+            respuesta["misma"] = False
+        return respuesta
 
     def anotar_bordes(self, bordes: Dict[str, Any]) -> List[str]:
         """El arranque le dice al origen a qué bordes puede avisar.
