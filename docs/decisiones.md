@@ -62,7 +62,7 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Implementa: Rubén
 - Revisa: Samy (19 nov). Observaciones de la revisión: de acuerdo con la regla; la diferencia es que obsoleta por TTL es «no sé si cambió» (cabe una cota de tiempo) e invalidada es «me dijeron que cambió» (no cabe). En el borde esto será la causa `invalidada` en la línea `miss` y la rama `rechaza causa=invalidada` de la regla de obsoleto; se implementa cuando exista F1-R06.
 - Preguntas abiertas para Rubén (F1-R06, F1-R07), propuesta de Samy el 19 nov:
-  1. Cómo llega el aviso al borde. **Respondida el mismo día por la entrada «La invalidación sale del origen hacia los bordes anotados»**: el arranque llama `origen.anotar_bordes(bordes)` y el origen llama `borde.invalidar(pedido_id, recurso, version)`. Diferencia con lo que dice esta entrada: el borde no marca la copia como invalidada, **la borra**; por tanto no existe la causa `invalidada` en `miss` ni la rama «invalidada dentro de `STALE_LIMIT`»: esa rama queda cubierta porque la copia ya no está. La regla de esta entrada sigue valiendo en espíritu (lo que el origen mandó quitar no se sirve).
+  1. Cómo llega el aviso al borde. **Respondida el mismo día por la entrada «La invalidación sale del origen hacia los bordes anotados»**: el arranque llama `origen.anotar_bordes(bordes)` y el origen llama `borde.invalidar(pedido_id, recurso, version)`. Por la noche Rubén cambió el borrado por la marca (entrada «El aviso recibido marca la copia, no la borra»), así que esta entrada vale tal cual: `miss causa=invalidada` y, con el origen en silencio, `rechaza causa=invalidada` (F1-S09).
   2. Cómo se simula el aviso perdido (el tablero pide dejarlo escrito). Sigue abierta (F1-R07). Propuesta: `origen.invalidar(pedido_id, recurso, saltar=[...])`, que avisa a todos los bordes anotados menos a los de `saltar` y anota `invalidar … bordes=… perdido=…`; el borde saltado conserva la copia vieja hasta expirar o revalidar. Es reproducible y no necesita tocar la red.
 
 ### 2026-11-16 — El origen dice que el archivo no existe
@@ -224,7 +224,7 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Por qué esta: si se borra, el pedido siguiente parece un `miss causa=no_esta` y no se distingue de un archivo que nunca estuvo. La copia tiene que seguir para poder negarla.
 - Qué no resuelve: si el origen no contesta, el pedido se queda esperando. El tiempo de espera y el `rechaza` de ese caso llegan con F1-S09.
 - Implementa: Rubén
-- Revisa: Samy (pendiente)
+- Revisa: Samy (19 nov). Observaciones de la revisión: de acuerdo; Samy había aplicado la misma marca en el borde esa tarde y se quedó con la versión de Rubén más dos cosas: la línea `invalidacion_recibida` lleva `version_local`, `version` y `habia_copia=si|no` para distinguir un borde que tenía copia de uno que no, y con el origen en silencio la copia invalidada da `rechaza causa=invalidada` (F1-S09, misma fecha). Adoptado también su criterio de que una copia invalidada nunca se renueva como `hit`: el borde no manda `version_local` en ese caso (decisión «Revalidación del lado borde»).
 
 ### 2026-11-19 — Revalidación del origen sin bytes si la versión coincide
 
@@ -235,3 +235,23 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Dónde está en el código: `fase1/origen.py`, método `responder`. Escenario `python3 -m fase1.escenarios revalidar`.
 - Implementa: Rubén
 - Revisa: Samy (pendiente)
+
+### 2026-11-19 — Qué es «el origen no responde» y la regla de obsoleto en el borde
+
+- Decisión: el borde llama al origen con `ray.wait(timeout=timeout_segundos)` (2 s en la configuración). «No responde» es una de tres cosas, cada una con su línea en el historial: la llamada no volvió a tiempo (`timeout destino=origen`), el actor del origen murió (`nodo_caido destino=origen`, por `RayActorError`), o la partición simulada está activa (`timeout destino=origen causa=particion`). En los tres casos el borde anota `origen_no_responde recurso=… edad_segundos=… stale_limit=…` y aplica la regla: sin copia → `rechaza causa=no_esta`; copia invalidada → `rechaza causa=invalidada`; copia obsoleta con `edad_segundos <= STALE_LIMIT` → `sirve_obsoleta`; si la supera → `rechaza causa=supera_limite`. La edad es el tiempo desde `expira_en`, no desde que se guardó. La copia que supera el límite no se borra. El borde no reintenta la llamada: si el origen vuelve, el siguiente pedido lo nota solo.
+- Alternativas consideradas: esperar sin límite (lo que hacía el código hasta hoy: el pedido se bloquea y el cliente también); reintentar una o dos veces antes de dar por perdido al origen; un timeout distinto para el cliente→borde y el borde→origen; medir la edad desde que se guardó la copia.
+- Por qué esta: el README (§9, §10) pide una condición explícita, y el tablero pide dejar escrito «qué se considera el origen no responde». Un solo número (`timeout_segundos`) para las dos llamadas es lo más corto de explicar y de cambiar. Sin reintento, porque el reintento sería una segunda espera de 2 s y la decisión de qué hacer con la copia ya la toma la regla; el README dice que la edad y el límite se escriben como datos de la línea, y así quedan. Medir desde `expira_en` es lo que fija el contrato («`STALE_LIMIT` mide cuánto tiempo lleva obsoleta»).
+- Qué no resuelve: la partición es un interruptor local (`particion(True)`), no un corte de red: Ray entregaría la llamada si la hiciéramos. Es la forma reproducible de provocar el experimento en la fase 1; en la fase 2 se corta con la red. `timeout` de verdad (origen lento, no muerto ni partido) no tiene escenario: haría falta un origen que tarde, y eso es la ficha F3-R03. El valor de `STALE_LIMIT` sigue siendo el provisional de 60 s; el experimento corre con `P20_STALE_LIMIT=4` para no esperar.
+- Dónde está en el código: `fase1/borde.py` (`_hablar_con_origen`, `_sin_origen`, `particion`; `rechaza causa=invalidada` usa la marca `Copia.invalidada` de la entrada de Rubén «El aviso recibido marca la copia»), `fase1/config.py` (`timeout_segundos`, `stale_limit_segundos`). Escenarios `obsoleto`, `invalidada` y `origen_caido` en `fase1/escenarios.py`. Ficha en `docs/experimento-fase1.md`.
+- Implementa: Samy
+- Revisa: Rubén (pendiente)
+
+### 2026-11-19 — Revalidación del lado borde: manda `version_local` solo si la copia expiró
+
+- Decisión: cuando la copia solo expiró (no está invalidada), el borde llama a `responder(pedido_id, recurso, version_local=copia.version)` (F1-R08). Si el origen contesta `misma=True`, no viajan bytes: la copia se renueva (`_renovar`), se anota `revalida … renovo=si` y el cliente ve `hit`. Si trae otra versión, `revalida … renovo=no bajo_otra=si`, `guarda`, `miss`. Cuando la copia está invalidada, o no hay copia, el borde no manda versión y pide el archivo entero: una copia invalidada nunca se renueva como `hit`, lo que mande el origen la reemplaza (si es el mismo número de versión, `revalida renovo=no` sin `bajo_otra`). La comparación es por igualdad.
+- Alternativas consideradas: mandar `version_local` también con la copia invalidada y quitar la marca si el origen confirma la misma versión (lo hacía el borde de Samy por la tarde; se descartó al adoptar la regla de Rubén: lo que el origen mandó quitar no se confirma, se reemplaza); un método aparte `revalidar` en el origen.
+- Por qué esta: es la propuesta de Samy para R08 y la firma que Rubén implementó el mismo día; es lo que hace HTTP con `If-None-Match` / `304`. No mandar la versión de una copia invalidada hace imposible que un `misma=True` reviva una copia que el origen quiso retirar, y deja una sola regla: invalidada → se baja de nuevo.
+- Qué no resuelve: un origen que reinicie y vuelva a la versión 1 confirmará `misma=True` a una copia con versión 1 aunque el contenido fuera otro; es la limitación de la etiqueta en memoria (revisión de la decisión «Hash del contenido», para la fase 2).
+- Dónde está en el código: `fase1/borde.py` (`pedir`, paso 3; `_hablar_con_origen`; `_con_respuesta_del_origen`, ramas b y c). Escenario `ttl` en `fase1/escenarios.py`; `revalidar` prueba el lado origen.
+- Implementa: Samy
+- Revisa: Rubén (pendiente)

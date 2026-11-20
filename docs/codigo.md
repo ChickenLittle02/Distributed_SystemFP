@@ -19,13 +19,13 @@ fase1/
   config.py             Números y listas de la corrida (TTL, STALE_LIMIT, bordes...)
   registro.py           Historial compartido (registrar)
   origen.py             Actor origen: versiones y responder
-  borde.py              Actor borde: copias con TTL y LRU; hit, miss, invalidar, guarda, expulsion
+  borde.py              Actor borde: copias con TTL y LRU; hit, miss, revalida, guarda, expulsion, invalidada marcada, STALE_LIMIT
   selector.py           Selector de fuente: en qué orden el cliente prueba los bordes
   cliente.py            Actor cliente: pedido_id, solicitud y respuesta; pasa al otro borde si uno no responde
   arrancar_origen.py    Arranca Ray y prueba listo + responder
   arrancar_borde.py     Arranca Ray, origen y un borde vacío
   arrancar_sistema.py   Arranca origen, dos bordes y cliente; tres pedidos (miss, hit, file_doesnt_exist)
-  escenarios.py         Escenarios ttl, lru, selector, invalidar, perdida y revalidar
+  escenarios.py         Escenarios ttl, lru, selector, invalidar, perdida, revalidar, obsoleto, invalidada, origen_caido
 contenido/
   apunte.txt            Archivo de prueba que reparte el origen
   apunte-2.txt          Segundo archivo de prueba, para llenar el borde (F1-S06)
@@ -34,6 +34,11 @@ logs/                   Historial en disco (no se versiona)
 requirements.txt        Dependencias de la fase 1 (Ray)
 docs/
   codigo.md             Este mapa
+  contrato.md           Lo visible desde fuera (Rubén)
+  decisiones.md         Decisiones de diseño, con revisión
+  diagrama.md           Procesos y qué pone Ray (F1-S02)
+  experimento-fase1.md  Ficha del experimento: partición y STALE_LIMIT (F1-S10)
+  mapa-ray.md           Qué resuelve Ray hoy y qué será explícito en la fase 2 (F1-S11)
 ```
 
 ## fase1/registro.py
@@ -65,9 +70,9 @@ Formato de una línea (igual que el README):
 - Qué es: el actor Ray del origen, dueño de la versión de referencia.
 - Dónde: `fase1/origen.py`.
 - Qué hace: lee `contenido/`, lleva por cada recurso `(version, hash SHA-256)` en `_versiones`, y con `responder(pedido_id, recurso, version_local=None)` entrega los bytes y la versión o `file_doesnt_exist`. Si `version_local` coincide con la versión del disco, no manda bytes: `misma=si`. Si no coincide, manda el archivo y anota `misma=no`. Sin `version_local` el pedido es una bajada normal. Anota `responde` en el historial. Si el hash cambió desde la última vez, la versión sube en 1; si es la primera vez, empieza en 1. Solo acepta nombres de archivo simples (sin rutas ni `..`). El arranque le pasa los bordes con `anotar_bordes`. `invalidar(pedido_id, recurso)` vuelve a leer el disco, deja la versión de referencia al día y llama a `invalidar` de cada borde anotado. La línea `invalidar` lleva el recurso, la versión nueva y `bordes=` con los que contestaron, en orden. Un borde muerto no entra en esa lista.
-- Qué no hace: no es el borde (no hay hit/miss, TTL, `STALE_LIMIT` ni expulsión) y no borra las copias. La línea `invalidacion_perdida` la escribe el borde que no aplicó el aviso, no el origen. El borde todavía no pasa `version_local` (eso es F1-S08). El aviso espera sin timeout. Un actor ya muerto no deja esa línea.
+- Qué no hace: no es el borde (no hay hit/miss, TTL, `STALE_LIMIT` ni expulsión) y no borra las copias. La línea `invalidacion_perdida` la escribe el borde que no aplicó el aviso, no el origen. El aviso espera sin timeout. Un actor ya muerto no deja esa línea.
 - Tareas: F1-R01, F1-R04, F1-R05, F1-R06, F1-R08.
-- Implementa: Rubén. Revisa: Samy (19 nov, R01–R05; `anotar_bordes` e `invalidar` de R06 pendientes).
+- Implementa: Rubén. Revisa: Samy (19 nov, R01–R05; R06 y R08 pendientes).
 
 ### Método `listo`
 
@@ -175,17 +180,17 @@ python3 -m fase1.arrancar_origen
 
 ## fase1/borde.py
 
-- Qué es: el actor Ray del borde, la caché cercana al cliente. Es el «borde con caché» de la guía (parte 6, paso 3), con TTL y expulsión.
+- Qué es: el actor Ray del borde, la caché cercana al cliente. Es el «borde con caché» de la guía (parte 6, paso 3), con TTL, expulsión, invalidación y la regla de contenido obsoleto.
 - Dónde: `fase1/borde.py`, clase `Borde` y dataclass `Copia`.
-- Qué hace: lleva `_copias` (recurso → `Copia` con `version`, `contenido`, `guardada_en`, `expira_en` e `invalidada`) en un `OrderedDict` en la memoria del actor, en orden de uso (la primera es la menos usada recientemente). `invalidar(pedido_id, recurso, version)` marca esa copia `invalidada` sin borrarla, anota `invalidacion_recibida` y devuelve el nombre del borde para que el origen lo cuente como avisado. Si `perder_avisos(True)` está activo, no la marca, anota `invalidacion_perdida` y devuelve `None`: la copia sigue válida y el siguiente pedido fresco es `hit`. `pedir(pedido_id, recurso)`:
-  - copia **fresca** y no invalidada (`ahora < expira_en`): anota `hit … estado=fresca`, la mueve al final (uso reciente) y la entrega sin hablar con el origen;
-  - copia **invalidada**: no se devuelve. Anota `miss causa=invalidada` y `pide_origen … version=N`. Si el origen entrega el archivo, se guarda esa versión nueva y el cliente ve `miss`. Si dice que no está, se borra;
-  - sin copia: anota `miss causa=no_esta` y `pide_origen`, llama a `origen.responder`, guarda lo que baja con `_guardar` (anota `guarda` con versión, bytes y `expira`) y responde `miss`;
-  - copia **obsoleta** (pasó el TTL): anota `miss causa=expirada` (con versión, hora en que expiró y segundos de obsolescencia) y `pide_origen … version=N`; si el origen confirma la misma versión, `_renovar` reinicia el TTL, anota `revalida … renovo=si expira=…` y luego `hit estado=fresca` (contrato, «Frescura»); si el origen trae otra versión, anota `revalida … renovo=no bajo_otra=si`, guarda la nueva y responde `miss`;
-  - si el origen dice que el archivo no existe, borra la copia de ese nombre si la hubiera (contrato), anota `borra recurso=… version=… causa=file_doesnt_exist` solo si había copia, y responde `file_doesnt_exist`.
-  `_guardar` aplica la **expulsión LRU**: si el recurso es nuevo y ya hay `capacidad` copias, saca la primera del `OrderedDict` (la menos usada) y anota `expulsion recurso=<sale> version=… politica=LRU entra=<entra>`. Reemplazar una copia que ya estaba no expulsa. `estado()` devuelve recurso → `{version, estado (invalidada/fresca/obsoleta), expira, edad_obsoleta}` en orden LRU.
-- Qué no hace: espera al origen sin límite, sin `origen_no_responde`, `sirve_obsoleta` ni `rechaza` (F1-S09). Una copia invalidada no se sirve ni con TTL vigente. La revalidación de hoy baja los bytes enteros para saber la versión: el mensaje de revalidación sin bajar el archivo es F1-S08, cuando el origen tenga F1-R08. La caché vive solo en memoria: si el actor muere, arranca vacío y no puede anotar un aviso perdido.
-- Tareas: F1-S01, F1-S03, F1-S04, F1-S05, F1-S06. El método `invalidar` es la aplicación en el borde de F1-R06. `perder_avisos` y `invalidacion_perdida` son F1-R07.
+- Qué hace: lleva `_copias` (recurso → `Copia` con `version`, `contenido`, `guardada_en`, `expira_en` e `invalidada`) en un `OrderedDict` en la memoria del actor, en orden de uso (la primera es la menos usada recientemente). `pedir(pedido_id, recurso)`:
+  - copia **usable** (fresca y no invalidada): anota `hit … estado=fresca`, la mueve al final y la entrega sin hablar con el origen;
+  - si no, anota `miss` con su causa: `no_esta`, `expirada` (con versión, hora de expiración y segundos obsoleta) o `invalidada` (con versión), y `pide_origen` (con `version=N` si había copia);
+  - llama al origen con `_hablar_con_origen`: `ray.wait(timeout=timeout_segundos)`. Si la copia solo expiró, manda `version_local=copia.version` (revalidación, F1-S08); si está invalidada o no hay copia, pide el archivo entero. Si no vuelve a tiempo anota `timeout destino=origen`; si el actor murió, `nodo_caido destino=origen`; si la partición simulada está activa, `timeout destino=origen causa=particion` sin llamar;
+  - **el origen contestó** (`_con_respuesta_del_origen`): no existe → `borra` (si había copia) y `file_doesnt_exist`; copia expirada y `misma=True` (sin bytes) → `_renovar` (TTL de nuevo), `revalida … renovo=si`, `hit`; otra versión, o copia invalidada → `revalida … renovo=no` (con `bajo_otra=si` solo si el número cambió), `_guardar`, `miss`. Una copia invalidada nunca se renueva como `hit`: lo que mande el origen la reemplaza;
+  - **el origen no contestó** (`_sin_origen`): anota `origen_no_responde recurso=… version=… edad_segundos=… stale_limit=…` (la edad es el tiempo desde `expira_en`). Sin copia → `rechaza causa=no_esta`; invalidada → `rechaza causa=invalidada`; `edad <= STALE_LIMIT` → `sirve_obsoleta`; si la supera → `rechaza causa=supera_limite`. La copia nunca se borra aquí.
+  `invalidar(pedido_id, recurso, version)` marca la copia (`invalidada=True`, no la borra) y anota `invalidacion_recibida … version_local=… version=… habia_copia=si|no`; con `perder_avisos(True)` no la marca, anota `invalidacion_perdida` y devuelve `None` (F1-R07). `particion(True|False)` corta o repara el camino al origen y anota `particion con=origen estado=cortada|reparada`. `_guardar` aplica la **expulsión LRU**: si el recurso es nuevo y ya hay `capacidad` copias, saca la primera y anota `expulsion recurso=<sale> version=… politica=LRU entra=<entra>`; LRU no mira el estado. `estado()` devuelve recurso → `{version, estado (fresca/obsoleta/invalidada), expira, edad_obsoleta}` en orden LRU.
+- Qué no hace: no reintenta la llamada al origen. La partición es un interruptor, no un corte de red. La caché vive solo en memoria: si el actor muere, arranca vacío. No decide a quién avisar (eso es el origen) ni elige entre bordes (eso es el selector).
+- Tareas: F1-S01, F1-S03, F1-S04, F1-S05, F1-S06, F1-S08, F1-S09. `invalidar` aplica F1-R06 (marca, no borra; Rubén); `perder_avisos` e `invalidacion_perdida` son F1-R07 (Rubén).
 - Implementa: Samy. Revisa: Rubén (pendiente).
 
 ### Método `listo`
@@ -196,17 +201,17 @@ python3 -m fase1.arrancar_origen
 | Sale | El nombre del nodo (`"borde-1"`) |
 | Si el otro nodo no contesta | No aplica |
 
-Deja `listo capacidad=2 politica=LRU ttl=30 stale_limit=60` en `logs/borde-1.log`.
+Deja `listo capacidad=2 politica=LRU ttl=30 stale_limit=60 timeout=2.0` en `logs/borde-1.log`.
 
 ### Método `pedir`
 
 | | |
 | --- | --- |
 | Entra | `pedido_id` (del cliente) y `recurso` |
-| Sale | Dict `resultado` (`hit`, `miss` o `file_doesnt_exist`), `version`, `contenido`, con el formato de `docs/contrato.md` |
-| Si el otro nodo no contesta | Hoy espera sin límite; el tiempo de espera y `STALE_LIMIT` llegan con F1-S09 |
+| Sale | Dict `resultado` (`hit`, `miss`, `sirve_obsoleta`, `rechaza` o `file_doesnt_exist`), `version`, `contenido`, con el formato de `docs/contrato.md`; `rechaza` y `file_doesnt_exist` sin versión ni bytes |
+| Si el otro nodo no contesta | `timeout`, `nodo_caido` o `timeout causa=particion`, luego `origen_no_responde` y la regla: `sirve_obsoleta` o `rechaza` |
 
-Historial de un miss seguido de un hit del mismo recurso (dos `pedido_id`):
+Un miss seguido de un hit del mismo recurso (dos `pedido_id`):
 
 ```text
 19:12:17.170 borde-1 pedido=b5260c miss recurso=apunte.txt causa=no_esta
@@ -215,14 +220,14 @@ Historial de un miss seguido de un hit del mismo recurso (dos `pedido_id`):
 19:12:17.185 borde-1 pedido=093bc5 hit recurso=apunte.txt version=1 estado=fresca
 ```
 
-El mismo recurso pedido después de expirar el TTL (corrida con `P20_TTL=3`), con el origen confirmando la misma versión:
+El mismo recurso después de expirar el TTL, con el origen confirmando la misma versión sin mandar bytes (F1-S08 + F1-R08):
 
 ```text
-19:12:21.218 borde-1 pedido=a593e5 miss recurso=apunte.txt causa=expirada version=1 expiro=19:12:20 edad_segundos=1
-19:12:21.219 borde-1 pedido=a593e5 pide_origen recurso=apunte.txt version=1
-19:12:21.221 origen  pedido=a593e5 responde recurso=apunte.txt version=1
-19:12:21.223 borde-1 pedido=a593e5 revalida recurso=apunte.txt version_local=1 version_origen=1 renovo=si expira=19:12:24
-19:12:21.223 borde-1 pedido=a593e5 hit recurso=apunte.txt version=1 estado=fresca
+21:47:59.316 borde-1 pedido=563d2d miss recurso=apunte.txt causa=expirada version=1 expiro=21:47:58 edad_segundos=1
+21:47:59.316 borde-1 pedido=563d2d pide_origen recurso=apunte.txt version=1
+21:47:59.318 origen  pedido=563d2d responde recurso=apunte.txt version=1 misma=si
+21:47:59.319 borde-1 pedido=563d2d revalida recurso=apunte.txt version_local=1 version_origen=1 renovo=si expira=21:48:02
+21:47:59.319 borde-1 pedido=563d2d hit recurso=apunte.txt version=1 estado=fresca
 ```
 
 Un tercer recurso en un borde de capacidad 2, donde `apunte-2.txt` era la copia menos usada:
@@ -234,7 +239,19 @@ Un tercer recurso en un borde de capacidad 2, donde `apunte-2.txt` era la copia 
 19:12:24.112 borde-1 pedido=b5079d guarda recurso=apunte-3.txt version=1 bytes=76 expira=19:12:27
 ```
 
-`causa` en la línea `miss` dice por qué no se usó la copia: `no_esta`, `expirada` o `invalidada`. Con `STALE_LIMIT` llegará `supera_limite` (README, «Qué se anota»).
+Copia obsoleta 1 s con el origen partido (`STALE_LIMIT=4`), y la misma copia 6 s después:
+
+```text
+21:36:14.090 borde-1 pedido=11b12d miss recurso=apunte.txt causa=expirada version=1 expiro=21:36:13 edad_segundos=1
+21:36:14.090 borde-1 pedido=11b12d pide_origen recurso=apunte.txt version=1
+21:36:14.090 borde-1 pedido=11b12d timeout destino=origen causa=particion segundos=2.0
+21:36:14.090 borde-1 pedido=11b12d origen_no_responde recurso=apunte.txt version=1 edad_segundos=1 stale_limit=4
+21:36:14.090 borde-1 pedido=11b12d sirve_obsoleta recurso=apunte.txt version=1 edad_segundos=1 stale_limit=4
+21:36:19.123 borde-1 pedido=90bd3e origen_no_responde recurso=apunte.txt version=1 edad_segundos=6 stale_limit=4
+21:36:19.123 borde-1 pedido=90bd3e rechaza recurso=apunte.txt causa=supera_limite version=1 edad_segundos=6 stale_limit=4
+```
+
+`causa` en la línea `miss` dice por qué no se usó la copia: `no_esta`, `expirada` o `invalidada`. `causa` en `rechaza`: `no_esta`, `invalidada` o `supera_limite` (README, «Qué se anota»).
 
 ### Método `invalidar`
 
@@ -242,11 +259,13 @@ Un tercer recurso en un borde de capacidad 2, donde `apunte-2.txt` era la copia 
 | --- | --- |
 | Entra | `pedido_id`, `recurso` y `version` de referencia (`None` si el archivo ya no está) |
 | Sale | El nombre del borde si aplicó el aviso, o `None` si no lo aplicó |
-| Si el otro nodo no contesta | No aplica: esta llamada es el aviso que llega. Con `perder_avisos`, la copia sigue válida |
+| Si el otro nodo no contesta | No aplica: esta llamada es el aviso que llega. Con `perder_avisos`, no marca la copia |
 
 ```text
-borde-1 pedido=inv-1 invalidacion_recibida recurso=apunte-inv.txt version=2
-borde-2 pedido=inv-2 invalidacion_perdida recurso=apunte-inv.txt version=1
+21:36:21.878 borde-1 pedido=inv-3 invalidacion_recibida recurso=apunte-inv.txt version_local=1 version=2 habia_copia=si
+21:36:21.901 borde-1 pedido=2edb00 miss recurso=apunte-inv.txt causa=invalidada version=1
+21:36:21.901 borde-1 pedido=2edb00 rechaza recurso=apunte-inv.txt causa=invalidada version=1
+borde-2 pedido=inv-2 invalidacion_perdida recurso=apunte-inv.txt version_local=1 version=2
 ```
 
 ### Método `perder_avisos`
@@ -257,14 +276,24 @@ borde-2 pedido=inv-2 invalidacion_perdida recurso=apunte-inv.txt version=1
 | Sale | El valor que quedó guardado |
 | Si el otro nodo no contesta | No aplica: no llama a nadie |
 
-Es la simulación de F1-R07. Ray entrega la llamada si el actor vive; este interruptor hace que el borde no la aplique. La copia se queda y, si sigue fresca, el siguiente pedido es `hit`.
+Es la simulación de F1-R07. Ray entrega la llamada si el actor vive; este interruptor hace que el borde no la aplique. La copia se queda sin marcar y, si sigue fresca, el siguiente pedido es `hit`.
+
+### Método `particion`
+
+| | |
+| --- | --- |
+| Entra | `True` para cortar el camino al origen, `False` para repararlo |
+| Sale | El estado nuevo |
+| Si el otro nodo no contesta | Con el corte activo, el borde no llama al origen y anota `timeout destino=origen causa=particion`; el cliente sigue llegando |
+
+Es la simulación de la partición del README §9 (F1-S09, F1-R09). Deja `particion con=origen estado=cortada|reparada` con `pedido=particion`.
 
 ### Método `estado`
 
 | | |
 | --- | --- |
 | Entra | Nada |
-| Sale | Dict recurso → `{version, estado, expira, edad_obsoleta}` en orden LRU (la primera es la próxima en salir). Vacío si no hay copias |
+| Sale | Dict recurso → `{version, estado (fresca, obsoleta o invalidada), expira, edad_obsoleta}` en orden LRU (la primera es la próxima en salir). Vacío si no hay copias |
 | Si el otro nodo no contesta | No aplica |
 
 ## fase1/selector.py
@@ -347,14 +376,17 @@ El segundo pedido deja solo dos líneas en el borde y el cliente; el origen no i
 
 ## fase1/escenarios.py
 
-- Qué es: seis corridas cortas que provocan los comportamientos de F1-S05, S06, S07, F1-R06, F1-R07 y F1-R08 y los dejan en el historial.
-- Dónde: `fase1/escenarios.py`. Se corre con `python3 -m fase1.escenarios ttl|lru|selector|invalidar|perdida|revalidar|todos`. Con `P20_TTL=3` el escenario `ttl` no espera los 30 s provisionales.
+- Qué es: nueve corridas cortas que provocan los comportamientos de F1-S05, S06, S07, S08, S09, F1-R06, R07 y R08 y los dejan en el historial. Entre todas cubren los diez comportamientos del checklist.
+- Dónde: `fase1/escenarios.py`. Se corre con `python3 -m fase1.escenarios ttl|lru|selector|invalidar|perdida|revalidar|obsoleto|invalidada|origen_caido|todos`. Con `P20_TTL=3 P20_STALE_LIMIT=4` no se esperan los valores provisionales.
 - Qué hace:
-  - `ttl`: miss, hit fresca, espera `TTL + 1` s, y el tercer pedido anota `miss causa=expirada`, `pide_origen version=1`, `revalida renovo=si` y `hit`. Muestra `estado()` antes y después (fresca → obsoleta → fresca).
+  - `ttl`: miss, hit fresca, espera `TTL + 1` s, y el tercer pedido anota `miss causa=expirada`, `pide_origen version=1`, el origen contesta `misma=si` sin bytes, `revalida renovo=si` y `hit`. Muestra `estado()` antes y después (fresca → obsoleta → fresca).
   - `lru`: `apunte.txt`, `apunte-2.txt` (borde lleno), `apunte.txt` otra vez (hit, pasa a más usada), `apunte-3.txt` (`expulsion` de `apunte-2.txt`), `apunte-2.txt` otra vez (`miss causa=no_esta`, sale `apunte.txt`).
   - `selector`: un miss por `borde-1`, `ray.kill` de `borde-1`, y el siguiente pedido anota `nodo_caido destino=borde-1` y lo resuelve `borde-2`; el tercero va directo a `borde-2` porque `borde-1` queda evitado `evitar_borde_segundos`.
-  - `invalidar`: los dos bordes guardan `apunte-inv.txt`, el archivo cambia, `origen.invalidar` anota `version=2` y `bordes=borde-1,borde-2`, las dos copias quedan `invalidada` y el pedido siguiente es un `miss` de la versión nueva. `borde-2` sigue invalidada porque nadie se la pidió después. El archivo de prueba se borra al terminar.
+  - `invalidar`: los dos bordes guardan `apunte-inv.txt`, el archivo cambia, `origen.invalidar` anota `version=2` y `bordes=borde-1,borde-2`, las dos copias quedan `invalidada` y el pedido siguiente anota `miss causa=invalidada` y baja la versión nueva. El archivo de prueba se borra al terminar.
   - `perdida`: igual, pero `borde-2` tiene `perder_avisos`. Anota `invalidacion_perdida`, no sale en `bordes=`, y un pedido directo sigue en `hit` de la versión 1. El cliente, por `borde-1`, baja la versión 2.
-  - `revalidar`: `responder` sin `version_local` baja el archivo; con la misma `version_local` anota `misma=si` y no manda bytes; si el archivo cambió, anota `misma=no` y manda la versión nueva.
-- Qué no hace: no prueba `timeout` (haría falta un borde lento; eso es la ficha F3-R03), ni partición ni `STALE_LIMIT` (F1-S09, F1-R09). No hace que el borde pase `version_local` (F1-S08). No es la corrida del checklist.
-- Tareas: F1-S05, F1-S06, F1-S07 (Samy; revisa Rubén, pendiente), F1-R06 (`invalidar`), F1-R07 (`perdida`) y F1-R08 (`revalidar`). Estas tres las implementa Rubén; revisa Samy, pendiente.
+  - `revalidar` (Rubén, F1-R08): `responder` sin `version_local` baja el archivo; con la misma `version_local` anota `misma=si` y no manda bytes; si el archivo cambió, anota `misma=no` y manda la versión nueva.
+  - `obsoleto`: `borde-1` guarda, se corta `borde-1→origen` (`particion`), hit mientras está fresca, `sirve_obsoleta` con la copia 1 s obsoleta, `rechaza causa=supera_limite` a los 6 s (el cliente pasa a `borde-2`), y al reparar `revalida renovo=si` + `hit`. Es el experimento de `docs/experimento-fase1.md`.
+  - `invalidada`: aviso recibido en los dos bordes y después partición en los dos: `miss causa=invalidada`, `rechaza causa=invalidada`, el cliente rechaza; al reparar, miss de la versión 2.
+  - `origen_caido`: `ray.kill` del origen; hit mientras la copia es fresca, y al expirar `nodo_caido destino=origen` + `sirve_obsoleta`.
+- Qué no hace: no prueba un `timeout` de verdad (origen o borde lentos; ficha F3-R03). No es la corrida formal del checklist (F1-J06), aunque la cubre.
+- Tareas: F1-S05, F1-S06, F1-S07, F1-S08, F1-S09 (Samy; revisa Rubén, pendiente), F1-R06 (`invalidar`), F1-R07 (`perdida`) y F1-R08 (`revalidar`; implementa Rubén, revisa Samy, pendiente).

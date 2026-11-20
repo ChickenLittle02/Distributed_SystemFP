@@ -44,7 +44,7 @@ actores y lanza el pedido. Ese script no es un nodo del sistema.
 | Componente | Lo que es del proyecto | Lo que pone Ray hoy |
 | --- | --- | --- |
 | Origen | versión de referencia por hash, lectura de `contenido/`, `responder`, `invalidar` hacia los bordes que el arranque le anotó (F1-R06) | `@ray.remote`: el proceso donde vive; `responder.remote` y `invalidar.remote`: llamadas entre procesos; el estado en memoria (`_versiones`, la lista de bordes) dura lo que dura el actor |
-| Borde | copias en memoria con TTL (`expira_en`), `hit`/`miss` con causa, `guarda`, `revalida` por comparación de versión, expulsión LRU (F1-S04–S06); al recibir `invalidar`, marca la copia `invalidada` y no la devuelve; (pendiente) `STALE_LIMIT` | `@ray.remote`: proceso propio; `origen.responder.remote` + `ray.get`: la llamada al origen y la espera de la respuesta; (desde F1-S09) `ray.wait(timeout)` para decir «no responde» |
+| Borde | copias en memoria con TTL (`expira_en`), `hit`/`miss` con causa, `guarda`, `revalida` por comparación de versión, expulsión LRU (F1-S04–S06); al recibir `invalidar` marca la copia y no la sirve; regla `STALE_LIMIT` cuando el origen no contesta: `sirve_obsoleta` / `rechaza` (F1-S09); `particion` simula el corte | `@ray.remote`: proceso propio; `origen.responder.remote` + `ray.wait(timeout)`: la llamada al origen con tiempo de espera; `RayActorError` es cómo Ray dice que el origen murió |
 | Selector | orden de preferencia de bordes, memoria de cuál no respondió (F1-S07) | nada: es una clase dentro del proceso del cliente |
 | Cliente | `pedido_id`, `solicitud`/`respuesta`, pasar al siguiente borde si uno no responde o rechaza (F1-S07) | `@ray.remote`: proceso propio; `borde.pedir.remote` + `ray.wait(timeout)`: la llamada al borde con tiempo de espera; `RayActorError` es cómo Ray dice que el borde murió |
 | Registro | formato de la línea, un archivo por nodo | nada: escribe en disco local del proceso |
@@ -67,6 +67,8 @@ actores y lanza el pedido. Ese script no es un nodo del sistema.
 
 ## Qué no cubre este borrador todavía
 
-- La partición: cómo se corta el camino borde→origen dejando el camino cliente→borde (F1-R09).
+- Un `timeout` real (origen o borde lentos pero vivos): no hay escenario; es la ficha F3-R03.
+
+La partición borde→origen es `particion(True)` en el borde (F1-S09): el camino cliente→borde sigue abierto y el borde trata al origen como «no responde» (`timeout causa=particion`). La ficha está en `docs/experimento-fase1.md`; el mapa de lo que pone Ray, en `docs/mapa-ray.md`.
 
 Un borde puede no aplicar la invalidación (`perder_avisos` en `fase1/borde.py`, F1-R07). La llamada de Ray llega, la copia vieja se queda y el borde anota `invalidacion_perdida`. El origen no lo incluye en `bordes=`.
