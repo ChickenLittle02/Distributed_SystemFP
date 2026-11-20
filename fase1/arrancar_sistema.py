@@ -4,8 +4,9 @@ Responsabilidad: iniciar Ray, crear los cuatro actores (cada uno en su
 proceso), comprobar que viven y hacer tres pedidos de prueba por el
 cliente: el mismo recurso dos veces (miss y luego hit) y uno que no existe
 (file_doesnt_exist). Al final muestra las copias que quedaron en el borde.
-No es la corrida del checklist (F1-J06): esa se arma cuando el borde tenga
-TTL, expulsión y la regla de obsoleto.
+No es la corrida del checklist (F1-J06): solo hace miss, hit y
+file_doesnt_exist. TTL, expulsión, selector y la regla de obsoleto
+están en fase1/escenarios.py.
 """
 
 from __future__ import annotations

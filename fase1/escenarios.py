@@ -64,8 +64,9 @@ def escenario_ttl(cfg: Config) -> None:
     """F1-S05: miss, hit fresca, espera el TTL, miss causa=expirada y revalida.
 
     Entra: la Config. Sale: imprime los pedidos y el estado del borde antes
-    y después de expirar. Si el otro nodo no contesta: el pedido se queda
-    esperando (no hay timeout al origen hasta F1-S09).
+    y después de expirar. Si el otro nodo no contesta: el borde aplica el
+    timeout y STALE_LIMIT (F1-S09). Este escenario no corta el origen: el
+    tercer pedido revalida.
     """
     print(f"=== TTL: una copia está fresca {cfg.ttl_segundos:g} s y después queda obsoleta", flush=True)
     origen, bordes, cliente = _arrancar(cfg)

@@ -1,10 +1,9 @@
 # Diagrama de la fase 1 (borrador, F1-S02)
 
 Componentes de la aplicación y qué parte de Ray usa cada uno. Lo que es del
-proyecto está en `fase1/`; lo que pone Ray está marcado. Este borrador se
-completa cuando el borde tenga caché (F1-S04 en adelante) y se cierra con
-`docs/mapa-ray.md` (F1-S11). Desde el 18 nov (F1-S04) el borde ya guarda copias
-en su memoria. El pedido sigue siendo cliente → borde → origen, y en un `hit`
+proyecto está en `fase1/`; lo que pone Ray está marcado. El borde guarda
+copias en memoria (F1-S04). El mapa de lo que pone Ray está en
+`docs/mapa-ray.md` (F1-S11). El pedido sigue siendo cliente → borde → origen, y en un `hit`
 el camino se corta en el borde. Desde F1-R06 la invalidación va al revés:
 origen → cada borde, sin pasar por el cliente.
 

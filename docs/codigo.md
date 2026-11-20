@@ -38,6 +38,7 @@ docs/
   decisiones.md         Decisiones de diseño, con revisión
   diagrama.md           Procesos y qué pone Ray (F1-S02)
   experimento-fase1.md  Ficha del experimento: partición y STALE_LIMIT (F1-S10)
+  salida-fase1.md       Las cinco respuestas de la compuerta (F1-R10)
   mapa-ray.md           Qué resuelve Ray hoy y qué será explícito en la fase 2 (F1-S11)
 ```
 
@@ -176,7 +177,7 @@ python3 -m fase1.arrancar_origen
 - Qué hace: guarda `ttl_segundos` (30), `stale_limit_segundos` (60), `capacidad` (2), `expulsion` (`LRU`), `timeout_segundos` (2), `evitar_borde_segundos` (10: cuánto deja el selector al final a un borde que no respondió), `cifrado` (`False`) y `bordes` (`["borde-1", "borde-2"]`, orden de preferencia). `Config.desde_entorno()` deja cambiar los cinco números con `P20_TTL`, `P20_STALE_LIMIT`, `P20_CAPACIDAD`, `P20_TIMEOUT` y `P20_EVITAR_BORDE` para acortar una prueba. Lleva la frase de la política de selección como comentario.
 - Qué no hace: no decide nada; borde, selector y cliente leen de aquí.
 - Tareas: F1-S03, F1-S07 (y la usan S05, S06, S09).
-- Implementa: Samy. Revisa: Rubén (pendiente).
+- Implementa: Samy. Revisa: Rubén (20 nov, S03 y S07).
 
 ## fase1/borde.py
 
@@ -303,7 +304,7 @@ Es la simulación de la partición del README §9 (F1-S09, F1-R09). Deja `partic
 - Qué hace: `orden()` devuelve los bordes en el orden de preferencia de `Config.bordes`, moviendo al final a los que no respondieron en los últimos `evitar_borde_segundos`. Nunca descarta un borde: si los demás fallan, también se le pregunta. `no_respondio(borde)` anota el momento; `respondio(borde)` le devuelve su lugar.
 - Qué no hace: no decide hit, miss ni obsoleto (eso es del borde con su copia). No llama a nadie. El origen no está en su lista: el cliente nunca le habla al origen; es el borde quien baja de ahí.
 - Tareas: F1-S07.
-- Implementa: Samy. Revisa: Rubén (pendiente).
+- Implementa: Samy. Revisa: Rubén (20 nov).
 
 ### Método `orden`
 
@@ -320,7 +321,7 @@ Es la simulación de la partición del README §9 (F1-S09, F1-R09). Deja `partic
 - Qué hace: `pedir(recurso)` crea el `pedido_id` (6 hex) y recorre `selector.orden()`. Por cada borde anota `solicitud recurso=… fuente=<borde>` y lo llama con `ray.wait(timeout=timeout_segundos)`. Si la llamada no vuelve a tiempo anota `timeout destino=<borde>`; si el actor murió anota `nodo_caido destino=<borde>`; en los dos casos avisa al selector y sigue con el siguiente. Si el borde contesta `rechaza`, también prueba el siguiente (contrato). La primera respuesta que entrega (o `file_doesnt_exist`) es la final: anota `respuesta version=… resultado=… fuente=<borde>` y la devuelve con `fuente` y `pedido_id`. Si ningún borde entrega, anota `respuesta resultado=rechaza fuente=ninguna`.
 - Qué no hace: no guarda caché, no numera versiones, no aplica `STALE_LIMIT`, no habla con el origen.
 - Tareas: F1-S03, F1-S07.
-- Implementa: Samy. Revisa: Rubén (pendiente).
+- Implementa: Samy. Revisa: Rubén (20 nov).
 
 ### Método `pedir`
 
@@ -347,7 +348,7 @@ Un pedido con `borde-1` muerto (`ray.kill`), resuelto por `borde-2`; un `pedido_
 
 - Qué es: script de arranque de F1-S01.
 - Qué hace: `ray.init()`, crea `Origen` y `Borde("borde-1")`, llama a `listo()` de los dos y muestra `estado()` vacío. Se corre con `python3 -m fase1.arrancar_borde`.
-- Tareas: F1-S01. Implementa: Samy. Revisa: Rubén (pendiente).
+- Tareas: F1-S01. Implementa: Samy. Revisa: Rubén (19 nov). La explicación del arranque está en `docs/explicaciones.md`.
 
 ## fase1/arrancar_sistema.py
 
@@ -371,8 +372,8 @@ El segundo pedido deja solo dos líneas en el borde y el cliente; el origen no i
 09:16:31.923 cliente pedido=467a42 respuesta version=1 resultado=hit fuente=borde-1
 ```
 
-- Qué no hace: no es la corrida del checklist (F1-J06): falta la regla de obsoleto. TTL, expulsión y selector se ven en `fase1/escenarios.py`.
-- Tareas: F1-S03, F1-S04. Implementa: Samy. Revisa: Rubén (pendiente).
+- Qué no hace: no es la corrida del checklist (F1-J06). Solo hace miss, hit y `file_doesnt_exist`. TTL, expulsión, selector y la regla de obsoleto se ven en `fase1/escenarios.py`.
+- Tareas: F1-S03, F1-S04. Implementa: Samy. Revisa: Rubén (19 nov).
 
 ## fase1/escenarios.py
 

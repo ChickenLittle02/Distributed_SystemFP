@@ -93,7 +93,7 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Qué no resuelve: no cambia `sirve_obsoleta` ni `rechaza`, que siguen siendo los casos en los que el origen no contesta.
 - Dónde está en el código: `docs/contrato.md`.
 - Implementa: Rubén
-- Revisa: Samy (19 nov). Observaciones de la revisión: implementado en `fase1/borde.py` (`_con_respuesta_del_origen`: `revalida … renovo=si` y luego `hit estado=fresca`; se ve en `fase1.escenarios ttl`). El caso `revalida … renovo=no bajo_otra=si` seguido de `guarda` es el estado «actualizada» del README §5: no es un estado guardado, es la transición. Hoy el borde revalida bajando el archivo entero y comparando la versión, porque `responder` no acepta una versión local; funciona, pero no es una revalidación sin bytes.
+- Revisa: Samy (19 nov). Observaciones de la revisión: implementado en `fase1/borde.py` (`_con_respuesta_del_origen`: `revalida … renovo=si` y luego `hit estado=fresca`; se ve en `fase1.escenarios ttl`). El caso `revalida … renovo=no bajo_otra=si` seguido de `guarda` es el estado «actualizada» del README §5: no es un estado guardado, es la transición. Desde F1-R08, si la versión coincide, `responder` contesta `misma=si` y `contenido=None`: el archivo no vuelve a bajar.
 - Pregunta abierta para Rubén (F1-R08), propuesta de Samy el 19 nov: `responder(pedido_id, recurso, version_local=None)`. Resuelta el mismo día: se adoptó esa firma. Ver «Revalidación del origen sin bytes si la versión coincide».
 
 ### 2026-11-16 — Cuándo el borde borra una copia
@@ -142,10 +142,10 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Decisión: el borde y el cliente son actores Ray (`@ray.remote`), uno por proceso, igual que el origen. El cliente recibe los handles de los bordes al crearse. La selección de fuente no es un nodo: será un módulo que vive junto al cliente (F1-S07), como dice `docs/contrato.md` («la selección, que vive junto al cliente, escoge la fuente»).
 - Alternativas consideradas: cliente como script del lado del usuario sin actor; selector como un actor aparte al que el cliente le pregunta.
 - Por qué esta: la fase 1 tiene que correr en varios procesos de verdad, y el cliente es «un proceso distinto del origen y de los bordes» (contrato). Un selector como nodo aparte sería un componente inventado solo para la fase 1 y un punto más de fallo que el README no pide.
-- Qué no resuelve: hoy el cliente pide siempre al primer borde de la lista y espera sin límite. El paso a otro borde y el tiempo de espera son F1-S07 y F1-S09.
-- Dónde está en el código: `fase1/borde.py`, `fase1/cliente.py`, `fase1/arrancar_sistema.py`.
+- Qué no resuelve: esta decisión no fija el orden entre bordes ni el tiempo de espera. El selector y `ray.wait` quedaron en F1-S07. El selector sigue dentro del proceso del cliente, no como un actor aparte.
+- Dónde está en el código: `fase1/borde.py`, `fase1/cliente.py`, `fase1/arrancar_sistema.py`. El selector, desde F1-S07, está en `fase1/selector.py`.
 - Implementa: Samy
-- Revisa: Rubén (pendiente)
+- Revisa: Rubén (19 nov). Observaciones de la revisión: de acuerdo; el selector no es un actor, vive en el proceso del cliente. Se quitó la frase que decía que el cliente pide siempre al primer borde y espera sin límite: desde F1-S07 usa `ray.wait` y pasa al siguiente. La explicación está en `docs/explicaciones.md`.
 
 ### 2026-11-17 — La configuración en un solo archivo, con sobreescritura por entorno
 
@@ -155,37 +155,37 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Qué no resuelve: los valores siguen siendo provisionales (decisiones del 16 nov). La lista de bordes es estática: es el arranque estático que el tablero da por válido si queda justificado, y queda justificado aquí: en la fase 1 el descubrimiento lo hace Ray con los handles, y en la fase 2 la lista pasará a direcciones en la configuración.
 - Dónde está en el código: `fase1/config.py`.
 - Implementa: Samy
-- Revisa: Rubén (pendiente)
+- Revisa: Rubén (19 nov). Observaciones de la revisión: de acuerdo; TTL, `STALE_LIMIT`, capacidad, timeout y el orden de los bordes están en `Config`, y `desde_entorno` los cambia con `P20_*`.
 
 ### 2026-11-18 — La copia del borde vive en memoria, con versión, bytes y hora de guardado
 
 - Decisión: el borde guarda cada copia como `Copia(version, contenido, guardada_en)` en un diccionario en la memoria del actor (`_copias`). Un pedido con copia es `hit` y no toca el origen. Un pedido sin copia anota `miss causa=no_esta`, luego `pide_origen`, baja el archivo, anota `guarda` y responde `miss`. Si el origen contesta `file_doesnt_exist`, el borde borra la copia de ese nombre, como dice el contrato. La línea `miss` lleva `causa` para que, cuando lleguen TTL e invalidación, el historial diga por qué no sirvió la copia (`no_esta`, `expirada`, `invalidada`).
 - Alternativas consideradas: guardar las copias en disco (`logs/` o una carpeta `cache/` por borde) para que sobrevivan al reinicio del actor; guardar solo nombre y versión y volver a bajar el contenido en cada hit.
 - Por qué esta: la fase 1 solo tiene que mostrar los comportamientos de caché, y la guía (parte 6, paso 3) describe el borde como «guarda lo que baja y lo entrega si lo tiene». Guardar los bytes es lo que hace que el hit no hable con el origen; sin ellos no habría hit de verdad. Una caché solo en memoria es la descripción honesta que pide el tablero para la ficha de reinicio (F3-S03): si el borde muere, arranca vacío y el primer pedido es `miss`.
-- Qué no resuelve: la copia no tiene expiración ni estado fresca/obsoleta (F1-S05), no hay tope de capacidad ni expulsión (F1-S06), el borde no revalida (F1-S08) ni aplica `STALE_LIMIT` (F1-S09) y no sobrevive al reinicio del actor. `guardada_en` queda puesto para que el TTL cuente desde ahí.
+- Qué no resuelve: la copia no sobrevive al reinicio del actor. La expiración, la expulsión LRU, la revalidación y `STALE_LIMIT` están en F1-S05, F1-S06, F1-S08 y F1-S09. `guardada_en` es el instante desde el que cuenta el TTL.
 - Dónde está en el código: `fase1/borde.py` (`Copia`, `_copias`, `pedir`, `_guardar`, `estado`). La corrida de `fase1/arrancar_sistema.py` muestra miss, hit y `file_doesnt_exist` seguidos.
 - Implementa: Samy
-- Revisa: Rubén (pendiente)
+- Revisa: Rubén (19 nov). Observaciones de la revisión: de acuerdo; la corrida de esa noche dejó `725bee` en miss y `guarda`, `3855ec` en hit sin línea del origen, y `3e8e8c` en `file_doesnt_exist`. Se quitó la frase que decía que la copia no tenía expiración, LRU, revalidación ni `STALE_LIMIT`: esas cuatro piezas ya están. Lo que sigue sin resolver es el reinicio del actor. Hit, miss, timeout y `STALE_LIMIT` están en `docs/explicaciones.md`.
 
 ### 2026-11-19 — TTL en el borde: `expira_en`, y qué pasa con una copia obsoleta
 
 - Decisión: cada `Copia` lleva `expira_en = guardada_en + TTL`. Antes de esa hora está fresca y se sirve como `hit` sin hablar con el origen. Después está obsoleta: el borde anota `miss causa=expirada` (con la versión local, la hora en que expiró y los segundos que lleva obsoleta) y `pide_origen … version=N`, y pregunta al origen. Si el origen confirma la misma versión, la copia se queda, el TTL vuelve a contar desde ahora (`_renovar`), se anota `revalida … renovo=si` y el cliente ve `hit`. Si el origen trae otra versión, se anota `revalida … renovo=no bajo_otra=si`, se guarda la nueva y el cliente ve `miss`. La copia obsoleta nunca se borra por sí sola: solo la reemplaza el origen, la quita `file_doesnt_exist`, la invalidación o la expulsión LRU (decisión del 16 nov, «Cuándo el borde borra una copia»).
 - Alternativas consideradas: borrar la copia al expirar y tratarla como `no_esta` (más simple, pero deja sin copia para `sirve_obsoleta` y contradice el contrato); responder `miss` siempre que hubo que preguntar al origen aunque la versión fuera la misma (contradice la entrada «Misma versión en la revalidación es `hit`»); un hilo que expire copias por su cuenta (una decisión más que tomar en la fase 2 sin ganancia en la fase 1).
 - Por qué esta: el README (§5) pide los estados fresca → obsoleta → actualizada y que el historial lleve la edad y la expiración como datos; el contrato dice que la misma versión confirmada es `hit` y que `STALE_LIMIT` mide el tiempo obsoleta, así que la copia tiene que seguir guardada con su `expira_en` para que F1-S09 pueda calcular esa edad. La expiración se evalúa al pedir, no con un reloj aparte: es la forma más corta y deja la decisión a la vista en `pedir`.
-- Qué no resuelve: hoy el borde revalida bajando el archivo entero y comparando la versión, porque `responder` no acepta una versión local. El mensaje de revalidación propio (misma versión sin bytes) es F1-S08 del lado borde y F1-R08 del lado origen. Tampoco hay tiempo de espera: si el origen no contesta, el pedido se queda esperando (F1-S09). El valor del TTL sigue siendo el provisional de 30 s (decisión del 16 nov).
+- Qué no resuelve: el TTL de 30 s sigue siendo el provisional de la decisión del 16 nov. Si la versión coincide, el origen no manda los bytes (F1-R08 y F1-S08). Si no contesta, el borde aplica el timeout y `STALE_LIMIT` (F1-S09).
 - Dónde está en el código: `fase1/borde.py` (`Copia.expira_en`, `Copia.fresca`, `pedir`, `_con_respuesta_del_origen`, `_renovar`, `estado`). Escenario `ttl` en `fase1/escenarios.py`.
 - Implementa: Samy
-- Revisa: Rubén (pendiente)
+- Revisa: Rubén (19 nov). Observaciones de la revisión: de acuerdo. Corrida `P20_TTL=3`: `026f92` miss y `guarda`, `d5ebb2` hit fresca, estado `obsoleta` al pasar el TTL, `43aea3` con `responde misma=si` sin bytes, `revalida renovo=si` y hit. Se quitó la frase que decía que la revalidación baja el archivo entero y que no hay timeout.
 
 ### 2026-11-19 — Expulsión LRU con un `OrderedDict`, capacidad 2, visible en el log
 
 - Decisión: `_copias` es un `OrderedDict` en orden de uso: la primera copia es la menos usada recientemente. Un `hit` y un guardado o renovación mueven la copia al final. Cuando llega un recurso nuevo y ya hay `capacidad` copias, sale la primera y se anota `expulsion recurso=<sale> version=… politica=LRU entra=<entra>` antes de `guarda`. Reemplazar una copia que ya estaba (otra versión del mismo recurso) no cuenta como entrada nueva y no expulsa. `capacidad = 2` en la configuración, a propósito pequeña para ver la expulsión en una corrida de tres archivos.
 - Alternativas consideradas: FIFO (más simple, pero el README lo deja como segunda política y el tablero la pospone a F2-R04 «solo si el núcleo ya está verde»); una lista aparte con las horas de último uso (lo mismo con más código); contar la capacidad en bytes en vez de en copias.
 - Por qué esta: el tablero pide «expulsión LRU con capacidad pequeña, visible en el log» y el README (§4) deja la política como decisión del proyecto; LRU es la que una caché de contenido usa normalmente, y el `OrderedDict` de la biblioteca estándar la expresa sin estructura propia. Contar copias y no bytes es suficiente con archivos chicos y hace predecible el escenario.
-- Qué no resuelve: no hay segunda política para comparar (si entra, en la fase 2). Una copia obsoleta o, cuando exista, invalidada también puede ser expulsada: LRU no mira el estado, solo el uso. El origen no se entera de la expulsión; el siguiente pedido es `miss causa=no_esta`.
+- Qué no resuelve: no hay segunda política para comparar (si entra, en la fase 2). Una copia obsoleta o invalidada también puede ser expulsada: LRU no mira el estado, solo el uso. El origen no se entera de la expulsión; el siguiente pedido es `miss causa=no_esta`.
 - Dónde está en el código: `fase1/borde.py` (`_copias`, `move_to_end` en `pedir` y `_renovar`, `_guardar`). `capacidad` y `expulsion` en `fase1/config.py`. Escenario `lru` en `fase1/escenarios.py`.
 - Implementa: Samy
-- Revisa: Rubén (pendiente)
+- Revisa: Rubén (20 nov). Observaciones de la revisión: de acuerdo. Corrida de esa noche: tras el hit de `apunte.txt` (`e118e5`), `apunte-3.txt` (`b0433f`) expulsa `apunte-2.txt` con `politica=LRU`, y al volver a pedirlo (`8b6d05`) es `miss causa=no_esta` y expulsa `apunte.txt`. Se quitó «cuando exista»: la copia invalidada ya existe y LRU también puede expulsarla.
 
 ### 2026-11-19 — Política de selección: orden fijo de bordes, el que no responde va al final un rato
 
@@ -195,7 +195,7 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Qué no resuelve: con el orden fijo, si `borde-1` tiene una copia obsoleta dentro de `STALE_LIMIT` y el origen está en silencio, se sirve esa copia aunque `borde-2` tenga una fresca: el cliente no lo sabe y los bordes no se hablan. Es una consecuencia aceptada de la política; queda escrita para el experimento y para la fase 2. `timeout` no se prueba en `escenarios.py` porque haría falta un borde lento (ficha F3-R03). La partición entre un borde y el origen no pasa por el selector: es el borde quien la detecta (F1-S09, F1-R09).
 - Dónde está en el código: `fase1/selector.py` (`Selector`), `fase1/cliente.py` (`pedir`, `_llamar_borde`), `fase1/config.py` (`bordes`, `timeout_segundos`, `evitar_borde_segundos`). Escenario `selector` en `fase1/escenarios.py`.
 - Implementa: Samy
-- Revisa: Rubén (pendiente)
+- Revisa: Rubén (20 nov). Observaciones de la revisión: de acuerdo. Corrida `selector`: `6701c3` miss por `borde-1`; `7520f1` anota `nodo_caido destino=borde-1` y una segunda `solicitud` a `borde-2`; `d39273` no intenta `borde-1` y es hit en `borde-2`. El paso tras un `rechaza` se vio en la partición (`010bd0`, `supera_limite`). Sigue abierto el borde lento (F3-R03) y que una obsoleta de `borde-1` no hace preguntar a `borde-2`.
 
 ### 2026-11-19 — La invalidación sale del origen hacia los bordes anotados
 
@@ -255,3 +255,13 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Dónde está en el código: `fase1/borde.py` (`pedir`, paso 3; `_hablar_con_origen`; `_con_respuesta_del_origen`, ramas b y c). Escenario `ttl` en `fase1/escenarios.py`; `revalidar` prueba el lado origen.
 - Implementa: Samy
 - Revisa: Rubén (pendiente)
+
+### 2026-11-20 — HTTP en los dos canales; publicar solo en el origen
+
+- Decisión: en la fase 2 los dos canales son HTTP, con la biblioteca del lenguaje. El lector abre `GET /<recurso>` en el borde. El borde, si no tiene copia usable, hace `GET /<recurso>` al origen; para revalidar ese `GET` lleva la versión local y, si coincide, la respuesta no trae cuerpo. Quien publica habla solo con el origen: `PUT /<recurso>` crea o reemplaza, `DELETE /<recurso>` borra. El borde rechaza `PUT` y `DELETE`. Tras el cambio, el origen sube la versión e invalida a los bordes. La función de caché no ve el HTTP. No hay proxy ni caché externa.
+- Alternativas consideradas: dejar el canal borde↔origen en el texto de `enviar` / `recibir`; aceptar `PUT` y `DELETE` también en el borde.
+- Por qué esta: es la forma de una CDN. El lector y quien publica se prueban en el navegador. La vía de escritura no pasa por la caché, así que un cliente no sustituye la versión de referencia. La metodología permite una biblioteca normal de HTTP, y el aporte sigue en la caché.
+- Qué no resuelve: no hay cuentas ni contraseñas; puede publicar quien alcance la dirección del origen. El `pedido_id` del lector, si no viene, lo crea el borde. El cifrado previsto sigue siendo el canal borde↔origen. Los navegadores permanecen en claro. El código de la fase 1 no cambia.
+- Dónde está en el código: todavía no. Queda en el schedule: F2-S02, F2-S04, F2-S06, F2-S07, F2-R03 y F2-J10.
+- Implementa: Samy (HTTP del origen, `PUT` y `DELETE`) y Rubén (el `GET` del borde hacia el lector y hacia el origen)
+- Revisa: los dos, cuando el código exista
