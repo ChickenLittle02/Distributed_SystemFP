@@ -205,7 +205,7 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Qué no resuelve: un borde que no contesta no entra en la lista, pero la línea `invalidacion_perdida` es F1-R07. Como la copia se borra al llegar el aviso, el historial no usa `miss causa=invalidada`. El aviso no tiene timeout. El origen no invalida solo por ver un cambio de hash en `responder`: hace falta llamar a `invalidar`.
 - Dónde está en el código: `fase1/origen.py` (`anotar_bordes`, `invalidar`), `fase1/borde.py` (`invalidar`), el arranque en `fase1/arrancar_sistema.py` y `fase1/escenarios.py`. Escenario `python3 -m fase1.escenarios invalidar`.
 - Implementa: Rubén
-- Revisa: Samy (pendiente)
+- Revisa: Samy (20 nov). Observaciones de la revisión: de acuerdo; es el único mensaje origen → bordes y es empujado (llega antes de que alguien pida), y el origen avisa a todos los anotados porque no sabe quién guarda copia. Responde la pregunta abierta de la decisión «Archivos del origen en carpeta local»: el cambio se detecta llamando a `invalidar` a mano. Tres cosas: (1) el aviso no tiene timeout (`ray.get` por borde): un borde muerto se salta, uno colgado bloquea al origen; vale para la fase 1 y en la fase 2 el aviso lleva timeout (F2-S06). (2) Invalidar sin cambio en disco también marca la copia y el siguiente pedido la vuelve a bajar con el mismo número; el experimento cambia el archivo antes. (3) «Qué no resuelve» todavía dice que el historial no usa `miss causa=invalidada`; desde la marca sí lo usa: actualizar esa frase.
 
 ### 2026-11-19 — Cómo se simula una invalidación que un borde no aplica
 
@@ -215,7 +215,7 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Qué no resuelve: el borde sabe que soltó el aviso porque el interruptor es local. En la fase 2 un mensaje perdido no llega, y el borde no escribiría la línea por sí solo. Aquí la escribe para que el historial de la fase 1 tenga la evidencia. Un actor ya muerto sigue sin línea `invalidacion_perdida`.
 - Dónde está en el código: `fase1/borde.py` (`perder_avisos`, la rama de `invalidar`), `fase1/origen.py` (no cuenta un `None` en `bordes`). Escenario `python3 -m fase1.escenarios perdida`.
 - Implementa: Rubén
-- Revisa: Samy (pendiente)
+- Revisa: Samy (20 nov). Observaciones de la revisión: de acuerdo; en Ray la llamada llega si el actor vive, así que el interruptor local es la única simulación honesta, y es mejor que la propuesta de Samy de un `saltar=[…]` en el origen porque el README asigna la línea `invalidacion_perdida` al borde. Para la ficha F3-S04: el borde «sabe» que perdió el aviso solo por el interruptor; con un mensaje perdido de verdad (fase 2) esa línea no existe y la evidencia es la ausencia del borde en `bordes=` del origen. Tras un aviso perdido el sistema converge solo: el borde sirve la versión vieja hasta que su TTL vence, revalida, y el origen le da la nueva. TTL e invalidación se necesitan mutuamente.
 
 ### 2026-11-19 — El aviso recibido marca la copia, no la borra
 
@@ -234,7 +234,7 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Qué no resuelve: el borde todavía baja el archivo entero para revalidar. Pasar `copia.version` y tratar `misma` es F1-S08.
 - Dónde está en el código: `fase1/origen.py`, método `responder`. Escenario `python3 -m fase1.escenarios revalidar`.
 - Implementa: Rubén
-- Revisa: Samy (pendiente)
+- Revisa: Samy (20 nov). Observaciones de la revisión: de acuerdo; es `If-None-Match` / `304` con una sola llamada, y el borde la usa desde F1-S08 (manda `version_local` solo si la copia expiró; una invalidada se reemplaza, no se confirma). Dos notas para la fase 2: `responder` hashea el archivo en cada llamada, también al revalidar, lo que hace que la versión suba sola si alguien editó sin llamar a `invalidar`; el origen HTTP debería tener la versión calculada en el `PUT` y no releer en cada `GET`. Y el origen reiniciado vuelve a versión 1 y diría `misma=si` a una copia con versión 1 de otro contenido (ver la revisión de «Hash del contenido»). El circuito en el historial, con el mismo `pedido_id`: `pide_origen … version=N` (borde), `responde … misma=si` (origen), `revalida renovo=si` (borde).
 
 ### 2026-11-19 — Qué es «el origen no responde» y la regla de obsoleto en el borde
 
