@@ -4,10 +4,11 @@ Responsabilidad: levantar origen, dos bordes y cliente (como
 fase1/arrancar_sistema.py) y provocar, uno por uno, los comportamientos
 que el tablero pide ver en el historial: expiración por TTL, expulsión
 LRU, el paso a otro borde cuando uno no responde, y la invalidación que
-sale del origen hacia los dos bordes (F1-R06).
+sale del origen hacia los dos bordes (F1-R06), y el aviso que un borde
+no aplica (F1-R07).
 No es la corrida del checklist (F1-J06): esa se arma cuando el borde tenga
 la regla de obsoleto. No decide nada: solo pide y muestra lo que anotan
-los nodos. No simula un aviso perdido (F1-R07).
+los nodos.
 
 Cómo se corre, desde la raíz del repositorio:
 
@@ -15,7 +16,8 @@ Cómo se corre, desde la raíz del repositorio:
     python3 -m fase1.escenarios lru        # tres recursos en un borde de 2
     python3 -m fase1.escenarios selector   # mata borde-1 y pide otra vez
     python3 -m fase1.escenarios invalidar  # el origen avisa a los dos bordes
-    python3 -m fase1.escenarios todos      # los cuatro seguidos
+    python3 -m fase1.escenarios perdida    # borde-2 no aplica el aviso
+    python3 -m fase1.escenarios todos      # los cinco seguidos
 
 Para no esperar los 30 s del TTL provisional: P20_TTL=3.
 """
@@ -156,11 +158,47 @@ def escenario_invalidar(cfg: Config) -> None:
         ruta.unlink(missing_ok=True)
 
 
+def escenario_perdida(cfg: Config) -> None:
+    """F1-R07: borde-2 no aplica el aviso; su copia vieja sigue y queda anotado.
+
+    Entra: la Config. Sale: imprime la lista de avisados (sin borde-2), el
+    hit de la versión vieja en borde-2 y el miss de la versión nueva en borde-1.
+    Si el otro nodo no contesta: este escenario no apaga actores. El aviso
+    llega y borde-2 no lo aplica.
+    """
+    print("=== Aviso perdido: borde-2 no aplica la invalidación y lo anota", flush=True)
+    origen, bordes, cliente = _arrancar(cfg)
+    ruta = Path(__file__).resolve().parent.parent / "contenido" / "apunte-inv.txt"
+    primero, segundo = cfg.bordes[0], cfg.bordes[1]
+    try:
+        ruta.write_text("archivo para invalidar\n", encoding="utf-8")
+        print("--- los dos bordes guardan apunte-inv.txt en version 1", flush=True)
+        for nombre, borde in bordes.items():
+            r = ray.get(borde.pedir.remote(f"previo-{nombre}", "apunte-inv.txt"))
+            print(f"  {nombre}: resultado={r['resultado']} version={r['version']}", flush=True)
+        print(f"--- {segundo} pasa a no aplicar avisos (la copia se queda)", flush=True)
+        ray.get(bordes[segundo].perder_avisos.remote(True))
+        ruta.write_text("archivo para invalidar, version nueva\n", encoding="utf-8")
+        aviso = ray.get(origen.invalidar.remote("inv-2", "apunte-inv.txt"))
+        print(f"  => version={aviso['version']} bordes={aviso['bordes']}", flush=True)
+        print("--- estado: solo el borde que aplicó el aviso quedó sin la copia", flush=True)
+        for nombre, borde in bordes.items():
+            print(f"    {nombre}: {ray.get(borde.estado.remote())}", flush=True)
+        print(f"--- pedir a {segundo}: la copia vieja sigue fresca (hit version 1)", flush=True)
+        vieja = ray.get(bordes[segundo].pedir.remote("sigue", "apunte-inv.txt"))
+        print(f"  {segundo}: resultado={vieja['resultado']} version={vieja['version']}", flush=True)
+        print(f"--- el cliente pide a {primero}: baja la version nueva (miss)", flush=True)
+        _mostrar(ray.get(cliente.pedir.remote("apunte-inv.txt")))
+    finally:
+        ruta.unlink(missing_ok=True)
+
+
 ESCENARIOS = {
     "ttl": escenario_ttl,
     "lru": escenario_lru,
     "selector": escenario_selector,
     "invalidar": escenario_invalidar,
+    "perdida": escenario_perdida,
 }
 
 

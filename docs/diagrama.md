@@ -67,5 +67,6 @@ actores y lanza el pedido. Ese script no es un nodo del sistema.
 
 ## Qué no cubre este borrador todavía
 
-- El aviso de invalidación que no llega a un borde (F1-R07).
 - La partición: cómo se corta el camino borde→origen dejando el camino cliente→borde (F1-R09).
+
+Un borde puede no aplicar la invalidación (`perder_avisos` en `fase1/borde.py`, F1-R07). La llamada de Ray llega, la copia vieja se queda y el borde anota `invalidacion_perdida`. El origen no lo incluye en `bordes=`.

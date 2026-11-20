@@ -75,8 +75,8 @@ Corrida objetivo: un origen, dos bordes y un cliente, en varios procesos.
 - [x] **F1-R03** Esqueleto de `registrar` con el formato del README. Samy revisa. (plan 16–17 nov) Código en `fase1/registro.py`. Documentado en `docs/codigo.md`. Revisado por Samy el 19 nov: es la única función que escribe el historial, y borde, selector y cliente la usan tal cual.
 - [x] **F1-R04** Esqueleto del actor origen. Samy revisa. (plan 16–17 nov) Actor en `fase1/origen.py`. Documentado en `docs/codigo.md`. Revisado por Samy el 19 nov; dejó dos preguntas abiertas para R06 y R08 en `docs/decisiones.md`.
 - [x] **F1-R05** El origen guarda versiones, responde un recurso y anota `responde`. Samy revisa. (plan 18–20 nov) `responder` en `fase1/origen.py` lee `contenido/`, versiona por hash y anota. Documentado en `docs/codigo.md`. Revisado por Samy el 19 nov. Propuesta de Samy para R08: `responder(pedido_id, recurso, version_local=None)`.
-- [~] **F1-R06** Invalidación desde el origen, con la lista de bordes avisados. Samy la aplica en el borde. (plan 21–22 nov) `invalidar` en `fase1/origen.py` avisa a los bordes de `anotar_bordes` y anota `bordes=borde-1,borde-2`. El borde borra la copia y anota `invalidacion_recibida`. Escenario `python3 -m fase1.escenarios invalidar`. Documentado en `docs/codigo.md` y `docs/decisiones.md`. Falta la revisión de Samy. El aviso que no llega sigue en F1-R07.
-- [ ] **F1-R07** Caso en que un borde no recibe el aviso, anotado en el historial. Samy revisa. (plan 21–22 nov)
+- [~] **F1-R06** Invalidación desde el origen, con la lista de bordes avisados. Samy la aplica en el borde. (plan 21–22 nov) `invalidar` en `fase1/origen.py` avisa a los bordes de `anotar_bordes` y anota `bordes=borde-1,borde-2`. El borde borra la copia y anota `invalidacion_recibida`. Escenario `python3 -m fase1.escenarios invalidar`. Documentado en `docs/codigo.md` y `docs/decisiones.md`. Falta la revisión de Samy. **Corrección pendiente:** si el borde recibe el aviso, no borra la copia; la deja marcada como no válida y no la devuelve aunque se la pidan. El código de hoy todavía la borra.
+- [~] **F1-R07** Caso en que un borde no recibe el aviso, anotado en el historial. Samy revisa. (plan 21–22 nov) `perder_avisos` en `fase1/borde.py`: el aviso llega, no se aplica, la copia vieja sigue y se anota `invalidacion_perdida`. El origen no lo incluye en `bordes=`. Escenario `python3 -m fase1.escenarios perdida`. Documentado en `docs/codigo.md` y `docs/decisiones.md`. Falta la revisión de Samy.
 - [ ] **F1-R08** Revalidación del lado origen: misma versión o versión nueva. Samy revisa. (plan 23–24 nov)
 - [ ] **F1-R09** Provoca la partición del experimento y deja la evidencia en `logs/`. Samy redacta la ficha. (plan 25–26 nov)
 - [ ] **F1-R10** `docs/salida-fase1.md`: las cinco respuestas de la compuerta (qué problema resuelve, qué comportamiento tiene que sobrevivir al rediseño, qué hace el código, qué hace Ray, qué semántica de fallo se observó). Samy revisa. (plan 27 nov)
@@ -128,7 +128,7 @@ https://github.com/ChickenLittle02/Distributed_SystemFP
 - [ ] Miss si no está, y bajada desde el origen.
 - [ ] Versión y expiración por TTL.
 - [ ] Expulsión LRU cuando el borde se llena.
-- [ ] Invalidación que llega a los dos bordes.
+- [ ] Invalidación que llega a los dos bordes. Corrección pendiente en F1-R06: la copia no se borra; queda marcada no válida y no se devuelve aunque la pidan.
 - [ ] Un borde no aplica la invalidación, y eso queda anotado.
 - [ ] Revalidación cuando la copia expiró y el origen responde.
 - [ ] Un borde no responde y el selector usa el otro.

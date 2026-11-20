@@ -5,9 +5,10 @@ uno (hash SHA-256 como única señal de cambio), responder un pedido con
 el archivo o con file_doesnt_exist, y avisar a los bordes anotados cuando
 una copia deja de valer. Anota responde e invalidar en el historial.
 No es el borde: no hace hit/miss, TTL, STALE_LIMIT ni expulsión, y no
-borra las copias (eso lo hace el borde al recibir el aviso). No anota
-el aviso que no llegó (F1-R07) ni ofrece la API fina de revalidación
-(F1-R08); responder ya entrega la versión actual del disco.
+borra las copias (eso lo hace el borde al recibir el aviso). Si un borde
+no aplica el aviso, la línea invalidacion_perdida la escribe él (F1-R07);
+un actor ya muerto no puede escribirla. No ofrece la API fina de
+revalidación (F1-R08); responder ya entrega la versión actual del disco.
 """
 
 from __future__ import annotations
@@ -112,8 +113,9 @@ class Origen:
         Sale: dict con recurso, version (la de referencia tras leer el disco,
         o None si el archivo no está), bordes (los que contestaron, en orden)
         y resultado file_doesnt_exist cuando el archivo no está.
-        Si el otro nodo no contesta: ese borde no entra en bordes. No se
-        anota invalidacion_perdida; eso es F1-R07.
+        Si el otro nodo no contesta: ese borde no entra en bordes. Si el
+        actor sigue vivo y no aplica el aviso, él anota invalidacion_perdida
+        (F1-R07). Si el actor ya murió, no hay esa línea: no llegó a correr.
         """
         ruta = self._ruta_segura(recurso)
         if ruta is None or not ruta.is_file():
@@ -127,7 +129,8 @@ class Origen:
                 quien = ray.get(borde.invalidar.remote(pedido_id, recurso, version))
             except RayActorError:
                 continue
-            avisados.append(quien or nombre)
+            if quien:
+                avisados.append(quien)
 
         datos: Dict[str, Any] = {"recurso": recurso}
         if version is None:

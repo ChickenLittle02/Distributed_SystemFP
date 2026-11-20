@@ -3,15 +3,16 @@
 Responsabilidad: guardar copias de los recursos con su versión y su
 expiración (TTL), decidir hit o miss, pedir al origen cuando no hay copia
 usable, guardar lo que baja, expulsar por LRU cuando el borde se llena y
-borrar la copia cuando el origen avisa que ya no vale.
+borrar la copia cuando el origen avisa que ya no vale. Si perder_avisos
+está activo, el aviso no se aplica: la copia sigue y se anota
+invalidacion_perdida (F1-R07). Esa copia se sigue sirviendo con el TTL.
 Anota cada decisión con registrar: hit, miss (con causa), pide_origen,
-revalida, guarda, expulsion, borra, invalidacion_recibida.
+revalida, guarda, expulsion, borra, invalidacion_recibida, invalidacion_perdida.
 Todavía no hay tiempo de espera al origen ni STALE_LIMIT (F1-S09: hoy el
-origen que no contesta bloquea el pedido), ni el aviso que este borde no
-llega a aplicar (F1-R07), ni el mensaje de revalidación sin bajar los
-bytes (F1-S08, cuando el origen tenga F1-R08). No hay estado «invalidada»:
-el aviso del origen borra la copia (decisión de Rubén del 19 nov), así que
-el pedido siguiente es miss causa=no_esta.
+origen que no contesta bloquea el pedido), ni el mensaje de revalidación
+sin bajar los bytes (F1-S08, cuando el origen tenga F1-R08). No hay estado
+«invalidada»: si el aviso se aplica, la copia se borra y el pedido
+siguiente es miss causa=no_esta.
 No es el origen: no tiene la versión de referencia ni decide a quién
 avisar. No es el selector: no elige entre bordes; eso vive junto al
 cliente. No abre sockets: en la fase 1 habla con el origen por una
@@ -62,7 +63,7 @@ class Borde:
 
     Entra (al crearlo): nombre del nodo ("borde-1"), el handle del actor
     origen y la Config (TTL, capacidad, política).
-    Sale: listo(), pedir(...), estado() e invalidar(...).
+    Sale: listo(), pedir(...), estado(), perder_avisos(...) e invalidar(...).
     Si el otro nodo no contesta: el único «otro nodo» al que llama es el
     origen, desde pedir; por ahora esa llamada espera sin límite. El tiempo
     de espera y la regla de obsoleto llegan con F1-S09. invalidar no llama
@@ -78,6 +79,9 @@ class Borde:
         # Solo vive en la memoria del actor: si el borde muere, arranca vacío
         # y el primer pedido vuelve a ser miss.
         self._copias: "OrderedDict[str, Copia]" = OrderedDict()
+        # Simulación de F1-R07: Ray entrega la llamada si el actor vive.
+        # Con esto activo, invalidar no borra la copia y anota el aviso perdido.
+        self._pierde_avisos = False
 
     # ----------------------------------------------------------------- arranque
 
@@ -146,16 +150,36 @@ class Borde:
             for rec, c in self._copias.items()
         }
 
-    def invalidar(self, pedido_id: str, recurso: str, version: Optional[int]) -> str:
-        """El origen avisa que la copia de este recurso ya no vale: se borra.
+    def perder_avisos(self, activo: bool) -> bool:
+        """Simula que este borde no aplica los avisos de invalidación.
+
+        Entra: True para no aplicarlos, False para volver a aplicarlos.
+        Sale: el valor que quedó guardado.
+        Si el otro nodo no contesta: no aplica; no llama a nadie.
+        La copia que ya está se queda y el siguiente pedido la sirve si
+        sigue fresca. No es un borde muerto: el cliente puede seguir pidiendo.
+        """
+        self._pierde_avisos = activo
+        return self._pierde_avisos
+
+    def invalidar(self, pedido_id: str, recurso: str, version: Optional[int]) -> Optional[str]:
+        """El origen avisa que la copia de este recurso ya no vale.
 
         Entra: pedido_id, nombre del recurso y la versión de referencia
         (None si el archivo ya no está en el origen).
-        Sale: el nombre de este borde, para que el origen lo cuente como avisado.
+        Sale: el nombre de este borde si aplicó el aviso, o None si no lo
+        aplicó (perder_avisos). El origen solo cuenta el nombre como avisado.
         Si el otro nodo no contesta: no aplica; esta llamada es la que recibe.
-        El siguiente pedido de este recurso es un miss causa=no_esta: la copia
-        ya no está. El aviso que no llega a este método es F1-R07.
+        Si aplica, el siguiente pedido es un miss causa=no_esta. Si no aplica,
+        la copia sigue y se anota invalidacion_perdida.
         """
+        if self._pierde_avisos:
+            copia = self._copias.get(recurso)
+            datos: Dict[str, Any] = {"recurso": recurso}
+            if copia is not None:
+                datos["version"] = copia.version
+            registrar(self.nombre, pedido_id, "invalidacion_perdida", **datos)
+            return None
         self._copias.pop(recurso, None)
         datos: Dict[str, Any] = {"recurso": recurso}
         if version is not None:

@@ -206,3 +206,23 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Dónde está en el código: `fase1/origen.py` (`anotar_bordes`, `invalidar`), `fase1/borde.py` (`invalidar`), el arranque en `fase1/arrancar_sistema.py` y `fase1/escenarios.py`. Escenario `python3 -m fase1.escenarios invalidar`.
 - Implementa: Rubén
 - Revisa: Samy (pendiente)
+
+### 2026-11-19 — Cómo se simula una invalidación que un borde no aplica
+
+- Decisión: `perder_avisos(True)` en un borde hace que `invalidar` no borre la copia y anote `invalidacion_perdida` con el recurso y la versión que se quedó. El método devuelve `None` y el origen no pone a ese borde en `bordes=`. La copia sigue la regla de frescura: si el TTL no venció, el siguiente pedido a ese borde es `hit` de la versión vieja. El otro borde, si aplicó el aviso, queda vacío y el pedido de después baja la versión nueva.
+- Alternativas consideradas: no llamar a ese borde desde el origen (entonces el borde no puede escribir la línea, y el README la asigna al borde); matar el actor (eso es `nodo_caido`: el cliente tampoco puede pedirle, y no queda la copia servible); marcar la copia `invalidada` sin borrarla en el borde que sí recibió el aviso.
+- Por qué esta: el tablero pide el caso en que un borde no aplica la invalidación y que eso quede anotado. En Ray, si el actor vive, la llamada llega. El interruptor es la simulación: el aviso entra y no se aplica. No es un borde caído. La decisión del 16 nov ya decía que la copia que no recibió la invalidación sigue la regla de frescura.
+- Qué no resuelve: el borde sabe que soltó el aviso porque el interruptor es local. En la fase 2 un mensaje perdido no llega, y el borde no escribiría la línea por sí solo. Aquí la escribe para que el historial de la fase 1 tenga la evidencia. Un actor ya muerto sigue sin línea `invalidacion_perdida`.
+- Dónde está en el código: `fase1/borde.py` (`perder_avisos`, la rama de `invalidar`), `fase1/origen.py` (no cuenta un `None` en `bordes`). Escenario `python3 -m fase1.escenarios perdida`.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)
+
+### 2026-11-19 — Corrección pendiente: el aviso recibido no borra la copia
+
+- Decisión: cuando el borde recibe la invalidación, no borra el archivo. Deja la copia marcada como no válida y no la devuelve aunque se la pidan. El código de hoy hace lo contrario: `invalidar` en `fase1/borde.py` la saca de `_copias`. Hay que cambiar ese caso. F1-R06 sigue abierta por esto.
+- Alternativas consideradas: seguir borrándola al recibir, como dice el contrato del 16 nov («Llega la invalidación de esa copia»).
+- Por qué esta: la copia invalidada tiene que seguir en el borde para poder negarla. Si se borra, el pedido siguiente parece un `miss causa=no_esta` y no se distingue de un archivo que nunca estuvo.
+- Qué no resuelve: el código todavía no lo hace. Tampoco está escrito qué resultado ve el cliente en ese pedido (`miss causa=invalidada` y bajada de la versión nueva, o `rechaza` si el origen no contesta). El aviso que no se aplica (F1-R07) no cambia: esa copia sigue válida y se puede devolver.
+- Dónde está en el código: hoy, el borrado está en `fase1/borde.py`, método `invalidar`. La corrección todavía no.
+- Implementa: Rubén (pendiente de corregir)
+- Revisa: Samy (pendiente)
