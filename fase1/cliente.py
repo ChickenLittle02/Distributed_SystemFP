@@ -56,6 +56,10 @@ class Cliente:
         entregó, o None si rechaza) y pedido_id.
         Si el otro nodo no contesta: pasa al siguiente borde del selector;
         si ninguno entrega, el resultado es rechaza.
+        Historial: un mismo pedido_id puede dejar varias líneas solicitud
+        (una por borde probado); la línea respuesta lleva la fuente que
+        entregó. El cliente nunca nombra el borde: lo elige el selector
+        (docs/decisiones.md, 16 nov «El cliente pide por nombre»).
         """
         pedido_id = pedido_id or uuid.uuid4().hex[:6]
         for borde in self.selector.orden():
@@ -66,7 +70,11 @@ class Cliente:
                 continue
             self.selector.respondio(borde)
             if r["resultado"] == "rechaza":
-                # Ese borde agotó sus fuentes; el contrato dice probar el otro.
+                # El rechaza de un borde no es final: ese borde agotó sus
+                # fuentes y el contrato dice probar el otro. El rechaza final
+                # lo anota el cliente abajo, cuando no queda ningún borde
+                # (docs/decisiones.md, 16 nov «rechaza solo cuando ninguna
+                # fuente entrega»).
                 continue
             registrar(self.nombre, pedido_id, "respuesta", version=r.get("version"),
                       resultado=r["resultado"], fuente=borde)

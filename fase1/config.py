@@ -29,7 +29,9 @@ class Config:
     ttl_segundos: float = 30.0
     # Cuánto tiempo puede llevar obsoleta una copia para servirla cuando el
     # origen no contesta (segundos). No cuenta desde que se guardó: cuenta
-    # desde que expiró.
+    # desde que expiró. Con TTL 30 y límite 60, una copia es servible hasta
+    # 90 s después de guardada si el origen calla. Es la única cota que el
+    # borde puede medir solo (no sabe cuántas versiones lleva de atraso).
     stale_limit_segundos: float = 60.0
     # Copias que caben en un borde. Pequeña a propósito para ver la expulsión.
     capacidad: int = 2

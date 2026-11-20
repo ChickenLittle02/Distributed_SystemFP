@@ -5,11 +5,13 @@ expiración (TTL), decidir hit o miss, pedir al origen cuando no hay copia
 usable, guardar lo que baja, expulsar por LRU cuando el borde se llena y
 borrar la copia cuando el origen avisa que ya no vale.
 Anota cada decisión con registrar: hit, miss (con causa), pide_origen,
-revalida, guarda, expulsion, invalidacion_recibida.
+revalida, guarda, expulsion, borra, invalidacion_recibida.
 Todavía no hay tiempo de espera al origen ni STALE_LIMIT (F1-S09: hoy el
 origen que no contesta bloquea el pedido), ni el aviso que este borde no
 llega a aplicar (F1-R07), ni el mensaje de revalidación sin bajar los
-bytes (F1-S08, cuando el origen tenga F1-R08).
+bytes (F1-S08, cuando el origen tenga F1-R08). No hay estado «invalidada»:
+el aviso del origen borra la copia (decisión de Rubén del 19 nov), así que
+el pedido siguiente es miss causa=no_esta.
 No es el origen: no tiene la versión de referencia ni decide a quién
 avisar. No es el selector: no elige entre bordes; eso vive junto al
 cliente. No abre sockets: en la fase 1 habla con el origen por una
@@ -169,13 +171,22 @@ class Borde:
         # a. El origen dice que el archivo no existe: contrato, se borra la
         #    copia de ese nombre si la hubiera, y no hay versión ni contenido.
         if not r.get("existe"):
-            self._copias.pop(recurso, None)
+            vieja = self._copias.pop(recurso, None)
+            if vieja is not None:
+                registrar(self.nombre, pedido_id, "borra", recurso=recurso,
+                          version=vieja.version, causa="file_doesnt_exist")
             return {"resultado": "file_doesnt_exist", "version": None, "contenido": None}
 
         # b. Había copia expirada y el origen confirma la misma versión: la
         #    copia sigue, el TTL vuelve a empezar y el cliente ve hit (contrato,
-        #    «Frescura»). Es la revalidación mínima; F1-S08 la hará sin bajar
-        #    los bytes cuando el origen tenga F1-R08.
+        #    «Frescura»; decisión del 16 nov «Misma versión en la revalidación
+        #    es hit»). Es la revalidación mínima: hoy baja el archivo entero
+        #    para saber la versión. F1-S08 pasará copia.version al origen y
+        #    tratará la respuesta sin bytes cuando exista F1-R08
+        #    (propuesta en docs/decisiones.md, revisión de esa entrada).
+        #    Se compara con igualdad, no con «mayor que»: el origen manda y
+        #    los números son etiquetas (si el origen reinicia y vuelve a 1,
+        #    el borde reemplaza su copia por lo que el origen dice).
         if copia is not None and copia.version == r["version"]:
             self._renovar(recurso, copia)
             registrar(self.nombre, pedido_id, "revalida", recurso=recurso,
@@ -207,7 +218,9 @@ class Borde:
     def _guardar(self, pedido_id: str, recurso: str, version: int, contenido: bytes) -> Copia:
         """Guarda (o reemplaza) la copia y anota guarda. Si el borde está
         lleno y el recurso es nuevo, expulsa primero la copia menos usada
-        recientemente y anota expulsion."""
+        recientemente y anota expulsion. LRU no mira el estado: una copia
+        obsoleta se queda guardada hasta que el origen hable, la invalide
+        o la expulse esto (decisión del 16 nov «Cuándo el borde borra»)."""
         if recurso in self._copias:
             # Reemplazo: no cambia cuántas copias hay, no hace falta expulsar.
             del self._copias[recurso]

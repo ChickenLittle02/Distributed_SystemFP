@@ -70,11 +70,11 @@ Corrida objetivo: un origen, dos bordes y un cliente, en varios procesos.
 
 ### Rubén
 
-- [~] **F1-R01** Arranque de Ray en local: un origen vacío corre. (plan 16–17 nov) `python3 -m fase1.arrancar_origen` crea el actor y deja `listo` en `logs/origen.log`. Documentado en `docs/codigo.md`. Falta la revisión de Samy.
-- [~] **F1-R02** `docs/contrato.md`: operaciones visibles (pedir un recurso, recibir versión y resultado), sin nombres internos de Ray. Samy revisa. (plan 16–17 nov) El texto ya cubre `rechaza` y `file_doesnt_exist`. Falta la revisión de Samy.
-- [~] **F1-R03** Esqueleto de `registrar` con el formato del README. Samy revisa. (plan 16–17 nov) Código en `fase1/registro.py`. Documentado en `docs/codigo.md`. Falta la revisión de Samy.
-- [~] **F1-R04** Esqueleto del actor origen. Samy revisa. (plan 16–17 nov) Actor en `fase1/origen.py`. Documentado en `docs/codigo.md`. Falta la revisión de Samy.
-- [~] **F1-R05** El origen guarda versiones, responde un recurso y anota `responde`. Samy revisa. (plan 18–20 nov) `responder` en `fase1/origen.py` lee `contenido/`, versiona por hash y anota. Documentado en `docs/codigo.md`. Falta la revisión de Samy.
+- [x] **F1-R01** Arranque de Ray en local: un origen vacío corre. (plan 16–17 nov) `python3 -m fase1.arrancar_origen` crea el actor y deja `listo` en `logs/origen.log`. Documentado en `docs/codigo.md`. Revisado por Samy el 19 nov.
+- [x] **F1-R02** `docs/contrato.md`: operaciones visibles (pedir un recurso, recibir versión y resultado), sin nombres internos de Ray. Samy revisa. (plan 16–17 nov) El texto ya cubre `rechaza` y `file_doesnt_exist`. Revisado por Samy el 19 nov; pidió precisar en el texto los dos niveles de `rechaza` (el del borde no es final; el final lo anota el cliente), ver la revisión de esa entrada en `docs/decisiones.md`.
+- [x] **F1-R03** Esqueleto de `registrar` con el formato del README. Samy revisa. (plan 16–17 nov) Código en `fase1/registro.py`. Documentado en `docs/codigo.md`. Revisado por Samy el 19 nov: es la única función que escribe el historial, y borde, selector y cliente la usan tal cual.
+- [x] **F1-R04** Esqueleto del actor origen. Samy revisa. (plan 16–17 nov) Actor en `fase1/origen.py`. Documentado en `docs/codigo.md`. Revisado por Samy el 19 nov; dejó dos preguntas abiertas para R06 y R08 en `docs/decisiones.md`.
+- [x] **F1-R05** El origen guarda versiones, responde un recurso y anota `responde`. Samy revisa. (plan 18–20 nov) `responder` en `fase1/origen.py` lee `contenido/`, versiona por hash y anota. Documentado en `docs/codigo.md`. Revisado por Samy el 19 nov. Propuesta de Samy para R08: `responder(pedido_id, recurso, version_local=None)`.
 - [~] **F1-R06** Invalidación desde el origen, con la lista de bordes avisados. Samy la aplica en el borde. (plan 21–22 nov) `invalidar` en `fase1/origen.py` avisa a los bordes de `anotar_bordes` y anota `bordes=borde-1,borde-2`. El borde borra la copia y anota `invalidacion_recibida`. Escenario `python3 -m fase1.escenarios invalidar`. Documentado en `docs/codigo.md` y `docs/decisiones.md`. Falta la revisión de Samy. El aviso que no llega sigue en F1-R07.
 - [ ] **F1-R07** Caso en que un borde no recibe el aviso, anotado en el historial. Samy revisa. (plan 21–22 nov)
 - [ ] **F1-R08** Revalidación del lado origen: misma versión o versión nueva. Samy revisa. (plan 23–24 nov)
@@ -99,7 +99,7 @@ Corrida objetivo: un origen, dos bordes y un cliente, en varios procesos.
 
 ### Los dos
 
-- [~] **F1-J01** Primera entrada de `docs/decisiones.md`: lenguaje Python + Ray, y el valor inicial de `STALE_LIMIT`. (plan 16–17 nov) Las dos entradas están escritas. Falta la revisión de Samy.
+- [x] **F1-J01** Primera entrada de `docs/decisiones.md`: lenguaje Python + Ray, y el valor inicial de `STALE_LIMIT`. (plan 16–17 nov) Las dos entradas están escritas y revisadas por Samy el 19 nov (observaciones en cada entrada).
 - [ ] **F1-J02** Un cliente pide un recurso desconocido y el segundo pedido es hit. El historial se filtra por `pedido_id`. (plan 18–20 nov) La corrida de `fase1/arrancar_sistema.py` ya lo hace (18 nov, ver `docs/codigo.md`); falta mirarlo juntos y filtrar `logs/*.log` por `pedido_id`.
 - [ ] **F1-J03** `registrar` está activo desde la primera operación, con el formato del README. `cifrado = false`.
 - [ ] **F1-J04** Cada archivo de código de esta fase tiene comentario de cabecera, cada función pública tiene su línea de funcionamiento, y `docs/codigo.md` describe todas las piezas de esta fase.

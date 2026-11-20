@@ -44,7 +44,7 @@ docs/
 - Qué no hace: no decide hit, miss, invalidación ni `STALE_LIMIT`. No abre sockets. No guarda el contenido de los archivos repartidos.
 - Quién lo usa: el origen (`listo`, `responder`, `invalidar`), el borde (`listo`, `miss`, `pide_origen`, `guarda`, `hit`, `invalidacion_recibida`) y el cliente (`listo`, `solicitud`, `respuesta`).
 - Tarea: F1-R03.
-- Implementa: Rubén. Revisa: Samy (pendiente).
+- Implementa: Rubén. Revisa: Samy (19 nov).
 
 ### Función `registrar`
 
@@ -67,7 +67,7 @@ Formato de una línea (igual que el README):
 - Qué hace: lee `contenido/`, lleva por cada recurso `(version, hash SHA-256)` en `_versiones`, y con `responder(pedido_id, recurso)` entrega los bytes y la versión o `file_doesnt_exist`. Anota `responde` en el historial. Si el hash cambió desde la última vez, la versión sube en 1; si es la primera vez, empieza en 1. Solo acepta nombres de archivo simples (sin rutas ni `..`). El arranque le pasa los bordes con `anotar_bordes`. `invalidar(pedido_id, recurso)` vuelve a leer el disco, deja la versión de referencia al día y llama a `invalidar` de cada borde anotado. La línea `invalidar` lleva el recurso, la versión nueva y `bordes=` con los que contestaron, en orden. Un borde muerto no entra en esa lista.
 - Qué no hace: no es el borde (no hay hit/miss, TTL, `STALE_LIMIT` ni expulsión) y no borra las copias. No anota `invalidacion_perdida` (F1-R07) ni tiene la API fina de revalidación (F1-R08); `responder` ya da la versión actual del disco. El aviso espera sin timeout.
 - Tareas: F1-R01, F1-R04, F1-R05, F1-R06.
-- Implementa: Rubén. Revisa: Samy (pendiente).
+- Implementa: Rubén. Revisa: Samy (19 nov, R01–R05; `anotar_bordes` e `invalidar` de R06 pendientes).
 
 ### Método `listo`
 
@@ -136,7 +136,7 @@ python3 -m fase1.arrancar_origen
 ```
 
 - Tareas: F1-R01, F1-R04, F1-R05.
-- Implementa: Rubén. Revisa: Samy (pendiente).
+- Implementa: Rubén. Revisa: Samy (19 nov).
 
 ## contenido/
 
@@ -175,7 +175,7 @@ python3 -m fase1.arrancar_origen
   - copia **fresca** (`ahora < expira_en`): anota `hit … estado=fresca`, la mueve al final (uso reciente) y la entrega sin hablar con el origen;
   - sin copia: anota `miss causa=no_esta` y `pide_origen`, llama a `origen.responder`, guarda lo que baja con `_guardar` (anota `guarda` con versión, bytes y `expira`) y responde `miss`;
   - copia **obsoleta** (pasó el TTL): anota `miss causa=expirada` (con versión, hora en que expiró y segundos de obsolescencia) y `pide_origen … version=N`; si el origen confirma la misma versión, `_renovar` reinicia el TTL, anota `revalida … renovo=si expira=…` y luego `hit estado=fresca` (contrato, «Frescura»); si el origen trae otra versión, anota `revalida … renovo=no bajo_otra=si`, guarda la nueva y responde `miss`;
-  - si el origen dice que el archivo no existe, borra la copia de ese nombre si la hubiera (contrato) y responde `file_doesnt_exist`.
+  - si el origen dice que el archivo no existe, borra la copia de ese nombre si la hubiera (contrato), anota `borra recurso=… version=… causa=file_doesnt_exist` solo si había copia, y responde `file_doesnt_exist`.
   `_guardar` aplica la **expulsión LRU**: si el recurso es nuevo y ya hay `capacidad` copias, saca la primera del `OrderedDict` (la menos usada) y anota `expulsion recurso=<sale> version=… politica=LRU entra=<entra>`. Reemplazar una copia que ya estaba no expulsa. `estado()` devuelve recurso → `{version, estado (fresca/obsoleta), expira, edad_obsoleta}` en orden LRU.
 - Qué no hace: espera al origen sin límite, sin `origen_no_responde`, `sirve_obsoleta` ni `rechaza` (F1-S09). Al recibir el aviso borra la copia, así que el pedido siguiente anota `miss causa=no_esta` y no `causa=invalidada`. No anota `invalidacion_perdida` (F1-R07). La revalidación de hoy baja los bytes enteros para saber la versión: el mensaje de revalidación sin bajar el archivo es F1-S08, cuando el origen tenga F1-R08. La caché vive solo en memoria: si el actor muere, arranca vacío.
 - Tareas: F1-S01, F1-S03, F1-S04, F1-S05, F1-S06. El método `invalidar` es la aplicación en el borde de F1-R06.
