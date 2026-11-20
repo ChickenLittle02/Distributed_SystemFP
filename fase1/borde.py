@@ -1,17 +1,19 @@
-"""Actor borde: la caché cercana al cliente (F1-S04 a F1-S06).
+"""Actor borde: la caché cercana al cliente (F1-S04 a F1-S06, aviso F1-R06).
 
 Responsabilidad: guardar copias de los recursos con su versión y su
 expiración (TTL), decidir hit o miss, pedir al origen cuando no hay copia
-usable, guardar lo que baja y expulsar por LRU cuando el borde se llena.
+usable, guardar lo que baja, expulsar por LRU cuando el borde se llena y
+borrar la copia cuando el origen avisa que ya no vale.
 Anota cada decisión con registrar: hit, miss (con causa), pide_origen,
-revalida, guarda, expulsion.
+revalida, guarda, expulsion, invalidacion_recibida.
 Todavía no hay tiempo de espera al origen ni STALE_LIMIT (F1-S09: hoy el
-origen que no contesta bloquea el pedido), ni invalidación (la aplica el
-borde cuando exista F1-R06), ni el mensaje de revalidación sin bajar los
+origen que no contesta bloquea el pedido), ni el aviso que este borde no
+llega a aplicar (F1-R07), ni el mensaje de revalidación sin bajar los
 bytes (F1-S08, cuando el origen tenga F1-R08).
-No es el origen: no tiene la versión de referencia. No es el selector: no
-elige entre bordes; eso vive junto al cliente. No abre sockets: en la fase
-1 habla con el origen por una llamada de Ray.
+No es el origen: no tiene la versión de referencia ni decide a quién
+avisar. No es el selector: no elige entre bordes; eso vive junto al
+cliente. No abre sockets: en la fase 1 habla con el origen por una
+llamada de Ray.
 """
 
 from __future__ import annotations
@@ -58,10 +60,11 @@ class Borde:
 
     Entra (al crearlo): nombre del nodo ("borde-1"), el handle del actor
     origen y la Config (TTL, capacidad, política).
-    Sale: listo(), pedir(...) y estado().
+    Sale: listo(), pedir(...), estado() e invalidar(...).
     Si el otro nodo no contesta: el único «otro nodo» al que llama es el
-    origen; por ahora la llamada espera sin límite. El tiempo de espera y
-    la regla de obsoleto llegan con F1-S09.
+    origen, desde pedir; por ahora esa llamada espera sin límite. El tiempo
+    de espera y la regla de obsoleto llegan con F1-S09. invalidar no llama
+    a nadie: es el aviso que llega desde el origen.
     """
 
     def __init__(self, nombre: str, origen: Any, config: Config) -> None:
@@ -140,6 +143,23 @@ class Borde:
             }
             for rec, c in self._copias.items()
         }
+
+    def invalidar(self, pedido_id: str, recurso: str, version: Optional[int]) -> str:
+        """El origen avisa que la copia de este recurso ya no vale: se borra.
+
+        Entra: pedido_id, nombre del recurso y la versión de referencia
+        (None si el archivo ya no está en el origen).
+        Sale: el nombre de este borde, para que el origen lo cuente como avisado.
+        Si el otro nodo no contesta: no aplica; esta llamada es la que recibe.
+        El siguiente pedido de este recurso es un miss causa=no_esta: la copia
+        ya no está. El aviso que no llega a este método es F1-R07.
+        """
+        self._copias.pop(recurso, None)
+        datos: Dict[str, Any] = {"recurso": recurso}
+        if version is not None:
+            datos["version"] = version
+        registrar(self.nombre, pedido_id, "invalidacion_recibida", **datos)
+        return self.nombre
 
     # ----------------------------------------------------------------- internos
 

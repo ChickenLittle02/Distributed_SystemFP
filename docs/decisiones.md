@@ -191,3 +191,13 @@ Cada entrada la escribe quien implementa. La otra persona la revisa y, si no pue
 - Dónde está en el código: `fase1/selector.py` (`Selector`), `fase1/cliente.py` (`pedir`, `_llamar_borde`), `fase1/config.py` (`bordes`, `timeout_segundos`, `evitar_borde_segundos`). Escenario `selector` en `fase1/escenarios.py`.
 - Implementa: Samy
 - Revisa: Rubén (pendiente)
+
+### 2026-11-19 — La invalidación sale del origen hacia los bordes anotados
+
+- Decisión: el origen no descubre bordes. El arranque se los pasa con `anotar_bordes` (la misma lista estática de `Config.bordes`). `invalidar(pedido_id, recurso)` lee el disco, deja la versión de referencia al día y llama a `invalidar` de cada borde. La línea del origen lleva el recurso, la versión nueva y solo los bordes que contestaron (`bordes=borde-1,borde-2`). El borde, al recibir, borra esa copia y anota `invalidacion_recibida`. El cliente no participa. El pedido siguiente es un miss normal (`causa=no_esta`) y baja la versión nueva.
+- Alternativas consideradas: subir la versión solo dentro de `responder`, para que el borde se entere cuando pregunte, sin un aviso empujado; que el cliente reenvíe la invalidación; avisar solo a los bordes que alguna vez pidieron ese recurso; marcar la copia como invalidada y dejarla guardada, en vez de borrarla.
+- Por qué esta: el README dibuja la invalidación como flechas del origen a cada borde, y el historial pide en la línea del origen el recurso, la versión nueva y los bordes avisados. El origen no sabe quién guardó la copia (tampoco se entera de una expulsión), así que avisa a todos los que el arranque le anotó. Borrar al recibir es el contrato del 16 nov («Llega la invalidación de esa copia»). Dejar el aviso fuera de `responder` permite invalidar sin esperar a que alguien pida.
+- Qué no resuelve: un borde que no contesta no entra en la lista, pero la línea `invalidacion_perdida` es F1-R07. Como la copia se borra al llegar el aviso, el historial no usa `miss causa=invalidada`. El aviso no tiene timeout. El origen no invalida solo por ver un cambio de hash en `responder`: hace falta llamar a `invalidar`.
+- Dónde está en el código: `fase1/origen.py` (`anotar_bordes`, `invalidar`), `fase1/borde.py` (`invalidar`), el arranque en `fase1/arrancar_sistema.py` y `fase1/escenarios.py`. Escenario `python3 -m fase1.escenarios invalidar`.
+- Implementa: Rubén
+- Revisa: Samy (pendiente)

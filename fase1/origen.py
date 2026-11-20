@@ -1,10 +1,12 @@
-"""Actor origen: versiones y respuesta de recursos.
+"""Actor origen: versiones, respuesta de recursos e invalidación.
 
 Responsabilidad: leer archivos de contenido/, llevar la versión de cada
-uno (hash SHA-256 como única señal de cambio) y responder un pedido con
-el archivo o con file_doesnt_exist. Anota responde en el historial.
-No es el borde: no hace hit/miss, TTL, STALE_LIMIT ni expulsión.
-Todavía no invalida bordes (F1-R06) ni ofrece la API fina de revalidación
+uno (hash SHA-256 como única señal de cambio), responder un pedido con
+el archivo o con file_doesnt_exist, y avisar a los bordes anotados cuando
+una copia deja de valer. Anota responde e invalidar en el historial.
+No es el borde: no hace hit/miss, TTL, STALE_LIMIT ni expulsión, y no
+borra las copias (eso lo hace el borde al recibir el aviso). No anota
+el aviso que no llegó (F1-R07) ni ofrece la API fina de revalidación
 (F1-R08); responder ya entrega la versión actual del disco.
 """
 
@@ -12,9 +14,10 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import ray
+from ray.exceptions import RayActorError
 
 from fase1.registro import registrar
 
@@ -27,15 +30,19 @@ class Origen:
     """Origen dueño de la versión de referencia de cada recurso.
 
     Entra (al crearlo): nada. Arranca sin estado en memoria; el disco es
-    contenido/.
-    Sale: listo() y responder(...).
-    Si el otro nodo no contesta: este actor no llama a bordes ni cliente.
+    contenido/. Los bordes se anotan después, con anotar_bordes.
+    Sale: listo(), responder(...), anotar_bordes(...) e invalidar(...).
+    Si el otro nodo no contesta: en invalidar, el borde que no contesta
+    no entra en la lista de avisados. La línea del aviso perdido es F1-R07.
     """
 
     def __init__(self) -> None:
         self.nombre = "origen"
         # recurso -> (version, hash_hex)
         self._versiones: Dict[str, Tuple[int, str]] = {}
+        # nombre del borde -> handle del actor. Lo llena el arranque.
+        # El origen no descubre bordes: sin esta lista, invalidar no avisa a nadie.
+        self._bordes: Dict[str, Any] = {}
 
     def listo(self) -> str:
         """Confirma que el origen está vivo y deja una línea en el historial.
@@ -85,6 +92,55 @@ class Origen:
             "version": version,
             "contenido": contenido,
             "resultado": "responde",
+        }
+
+    def anotar_bordes(self, bordes: Dict[str, Any]) -> List[str]:
+        """El arranque le dice al origen a qué bordes puede avisar.
+
+        Entra: nombre del borde -> handle del actor, en el orden de
+        preferencia de la configuración.
+        Sale: los nombres anotados, en ese mismo orden.
+        Si el otro nodo no contesta: no aplica; solo guarda los handles.
+        """
+        self._bordes = dict(bordes)
+        return list(self._bordes)
+
+    def invalidar(self, pedido_id: str, recurso: str) -> Dict[str, Any]:
+        """Avisa a los bordes anotados que su copia de este recurso ya no vale.
+
+        Entra: pedido_id y el nombre del recurso.
+        Sale: dict con recurso, version (la de referencia tras leer el disco,
+        o None si el archivo no está), bordes (los que contestaron, en orden)
+        y resultado file_doesnt_exist cuando el archivo no está.
+        Si el otro nodo no contesta: ese borde no entra en bordes. No se
+        anota invalidacion_perdida; eso es F1-R07.
+        """
+        ruta = self._ruta_segura(recurso)
+        if ruta is None or not ruta.is_file():
+            version: Optional[int] = None
+        else:
+            version, _contenido = self._version_y_bytes(recurso, ruta)
+
+        avisados: List[str] = []
+        for nombre, borde in self._bordes.items():
+            try:
+                quien = ray.get(borde.invalidar.remote(pedido_id, recurso, version))
+            except RayActorError:
+                continue
+            avisados.append(quien or nombre)
+
+        datos: Dict[str, Any] = {"recurso": recurso}
+        if version is None:
+            datos["resultado"] = "file_doesnt_exist"
+        else:
+            datos["version"] = version
+        datos["bordes"] = ",".join(avisados) if avisados else "ninguno"
+        registrar(self.nombre, pedido_id, "invalidar", **datos)
+        return {
+            "recurso": recurso,
+            "version": version,
+            "bordes": avisados,
+            "resultado": "file_doesnt_exist" if version is None else "invalidar",
         }
 
     def _ruta_segura(self, recurso: str) -> Optional[Path]:

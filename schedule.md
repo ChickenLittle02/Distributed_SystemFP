@@ -75,7 +75,7 @@ Corrida objetivo: un origen, dos bordes y un cliente, en varios procesos.
 - [~] **F1-R03** Esqueleto de `registrar` con el formato del README. Samy revisa. (plan 16–17 nov) Código en `fase1/registro.py`. Documentado en `docs/codigo.md`. Falta la revisión de Samy.
 - [~] **F1-R04** Esqueleto del actor origen. Samy revisa. (plan 16–17 nov) Actor en `fase1/origen.py`. Documentado en `docs/codigo.md`. Falta la revisión de Samy.
 - [~] **F1-R05** El origen guarda versiones, responde un recurso y anota `responde`. Samy revisa. (plan 18–20 nov) `responder` en `fase1/origen.py` lee `contenido/`, versiona por hash y anota. Documentado en `docs/codigo.md`. Falta la revisión de Samy.
-- [ ] **F1-R06** Invalidación desde el origen, con la lista de bordes avisados. Samy la aplica en el borde. (plan 21–22 nov)
+- [~] **F1-R06** Invalidación desde el origen, con la lista de bordes avisados. Samy la aplica en el borde. (plan 21–22 nov) `invalidar` en `fase1/origen.py` avisa a los bordes de `anotar_bordes` y anota `bordes=borde-1,borde-2`. El borde borra la copia y anota `invalidacion_recibida`. Escenario `python3 -m fase1.escenarios invalidar`. Documentado en `docs/codigo.md` y `docs/decisiones.md`. Falta la revisión de Samy. El aviso que no llega sigue en F1-R07.
 - [ ] **F1-R07** Caso en que un borde no recibe el aviso, anotado en el historial. Samy revisa. (plan 21–22 nov)
 - [ ] **F1-R08** Revalidación del lado origen: misma versión o versión nueva. Samy revisa. (plan 23–24 nov)
 - [ ] **F1-R09** Provoca la partición del experimento y deja la evidencia en `logs/`. Samy redacta la ficha. (plan 25–26 nov)

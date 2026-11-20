@@ -37,6 +37,8 @@ def main() -> None:
     ray.init(ignore_reinit_error=True)
     origen = Origen.remote()
     bordes = {nombre: Borde.remote(nombre, origen, cfg) for nombre in cfg.bordes}
+    # El origen no descubre bordes. Sin esta lista, invalidar no tiene a quién avisar.
+    ray.get(origen.anotar_bordes.remote(bordes))
     cliente = Cliente.remote("cliente", bordes, cfg)
 
     print(f"origen listo: {ray.get(origen.listo.remote())}", flush=True)

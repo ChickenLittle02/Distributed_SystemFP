@@ -1,19 +1,21 @@
-"""Escenarios de prueba del borde y del selector (F1-S05, F1-S06, F1-S07).
+"""Escenarios de prueba del borde, del selector y de la invalidación.
 
 Responsabilidad: levantar origen, dos bordes y cliente (como
 fase1/arrancar_sistema.py) y provocar, uno por uno, los comportamientos
 que el tablero pide ver en el historial: expiración por TTL, expulsión
-LRU y el paso a otro borde cuando uno no responde.
+LRU, el paso a otro borde cuando uno no responde, y la invalidación que
+sale del origen hacia los dos bordes (F1-R06).
 No es la corrida del checklist (F1-J06): esa se arma cuando el borde tenga
 la regla de obsoleto. No decide nada: solo pide y muestra lo que anotan
-los nodos.
+los nodos. No simula un aviso perdido (F1-R07).
 
 Cómo se corre, desde la raíz del repositorio:
 
     python3 -m fase1.escenarios ttl        # espera el TTL y vuelve a pedir
     python3 -m fase1.escenarios lru        # tres recursos en un borde de 2
     python3 -m fase1.escenarios selector   # mata borde-1 y pide otra vez
-    python3 -m fase1.escenarios todos      # los tres seguidos
+    python3 -m fase1.escenarios invalidar  # el origen avisa a los dos bordes
+    python3 -m fase1.escenarios todos      # los cuatro seguidos
 
 Para no esperar los 30 s del TTL provisional: P20_TTL=3.
 """
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict
 
 import ray
@@ -42,6 +45,7 @@ def _arrancar(cfg: Config):
     """Crea origen, los bordes de la configuración y el cliente; espera sus listo."""
     origen = Origen.remote()
     bordes = {nombre: Borde.remote(nombre, origen, cfg) for nombre in cfg.bordes}
+    ray.get(origen.anotar_bordes.remote(bordes))
     cliente = Cliente.remote("cliente", bordes, cfg)
     ray.get([origen.listo.remote(), cliente.listo.remote()]
             + [b.listo.remote() for b in bordes.values()])
@@ -119,7 +123,45 @@ def escenario_selector(cfg: Config) -> None:
     _mostrar(ray.get(cliente.pedir.remote("apunte.txt")))
 
 
-ESCENARIOS = {"ttl": escenario_ttl, "lru": escenario_lru, "selector": escenario_selector}
+def escenario_invalidar(cfg: Config) -> None:
+    """F1-R06: el origen avisa a los dos bordes y el historial lleva la lista.
+
+    Entra: la Config. Sale: imprime el estado de cada borde antes y después
+    del aviso, la lista de avisados y el pedido que baja la versión nueva.
+    Si el otro nodo no contesta: ese borde no saldría en la lista; este
+    escenario no apaga a nadie. El aviso perdido es F1-R07.
+    """
+    print("=== Invalidar: el origen avisa a los dos bordes y anota la lista", flush=True)
+    origen, bordes, cliente = _arrancar(cfg)
+    ruta = Path(__file__).resolve().parent.parent / "contenido" / "apunte-inv.txt"
+    try:
+        ruta.write_text("archivo para invalidar\n", encoding="utf-8")
+        print("--- los dos bordes bajan apunte-inv.txt (version 1) y lo guardan", flush=True)
+        for nombre, borde in bordes.items():
+            r = ray.get(borde.pedir.remote(f"previo-{nombre}", "apunte-inv.txt"))
+            print(f"  {nombre}: resultado={r['resultado']} version={r['version']}", flush=True)
+        print("--- estado antes del aviso:", flush=True)
+        for nombre, borde in bordes.items():
+            print(f"    {nombre}: {list(ray.get(borde.estado.remote()))}", flush=True)
+        ruta.write_text("archivo para invalidar, version nueva\n", encoding="utf-8")
+        print("--- el origen invalida: versión nueva y bordes que contestaron", flush=True)
+        aviso = ray.get(origen.invalidar.remote("inv-1", "apunte-inv.txt"))
+        print(f"  => version={aviso['version']} bordes={aviso['bordes']}", flush=True)
+        print("--- estado después: la copia ya no está en ningún borde", flush=True)
+        for nombre, borde in bordes.items():
+            print(f"    {nombre}: {list(ray.get(borde.estado.remote()))}", flush=True)
+        print("--- el siguiente pedido baja la versión nueva (miss)", flush=True)
+        _mostrar(ray.get(cliente.pedir.remote("apunte-inv.txt")))
+    finally:
+        ruta.unlink(missing_ok=True)
+
+
+ESCENARIOS = {
+    "ttl": escenario_ttl,
+    "lru": escenario_lru,
+    "selector": escenario_selector,
+    "invalidar": escenario_invalidar,
+}
 
 
 def main(argv) -> int:
